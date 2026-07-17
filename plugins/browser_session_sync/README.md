@@ -5,10 +5,12 @@ and localStorage across hard container restarts.
 
 ## Behavior
 
-- Restores the latest current-state snapshot once per runtime boot.
+- Restores the latest current-state snapshot into native tab registration before
+  the Browser viewer or agent receives its first tab list.
 - Tracks tab loads and closes with debounced, atomic snapshots.
 - Treats an empty tab set as authoritative, so closed tabs stay closed.
-- Restores the latest global browser state by default across chats.
+- Restores the latest global browser state by default across chats; each active
+  chat receives its own native runtime populated from that shared snapshot.
 - Can be switched to per-chat scope when an isolated browser cache is needed.
 - Deletes a chat's browser cache when that chat is removed by default, while preserving the global current state.
 - Keeps timestamped snapshots for explicit manual recovery.

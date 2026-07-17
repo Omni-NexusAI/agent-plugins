@@ -9,7 +9,12 @@ from usr.plugins.browser_session_sync.helpers.session_sync import (
 
 
 class BrowserSessionViewerFallback(Extension):
-    """Plugin-owned, boot-gated restore bootstrap for Browser viewer opens."""
+    """Early compatibility bootstrap for hosts without browser_runtime_started.
+
+    The _40 prefix deliberately runs before the native _browser WebSocket
+    extension. On current hosts the runtime-start hook consumes the restore
+    attempt first, making this a no-op.
+    """
 
     async def execute(
         self,
@@ -24,6 +29,6 @@ class BrowserSessionViewerFallback(Extension):
             return
         try:
             message = await auto_restore_runtime_session_for_context(context_id)
-            print(f"[browser_session_sync] viewer bootstrap: {message}")
+            print(f"[browser_session_sync] viewer startup fallback: {message}")
         except Exception as exc:
-            print(f"[browser_session_sync] viewer bootstrap restore failed for {context_id}: {exc}")
+            print(f"[browser_session_sync] viewer startup fallback failed for {context_id}: {exc}")

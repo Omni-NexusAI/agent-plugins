@@ -764,6 +764,7 @@ async def restore_core_session(
             await _inject_storage(core, context_state)
 
         opened = 0
+        first_restored_browser_id: int | None = None
         native_max_tabs = core._max_open_tabs()
         restore_limit = max_auto_restore_tabs()
         max_tabs = native_max_tabs
@@ -777,17 +778,41 @@ async def restore_core_session(
             page = await core.context.new_page()
             browser_page = await core._register_page(page)
             _register_page_save_listeners(core, page)
-            if core.last_interacted_browser_id is None:
-                core.last_interacted_browser_id = browser_page.id
+            if first_restored_browser_id is None:
+                first_restored_browser_id = browser_page.id
             await core._goto(page, url)
             existing_urls.add(url)
             opened += 1
+        if first_restored_browser_id is not None:
+            core.last_interacted_browser_id = first_restored_browser_id
     finally:
         setattr(core, RESTORING_FLAG, False)
 
     if opened or force:
         schedule_save(core, delay=SAVE_CLOSE_DEBOUNCE_SECONDS, reason="close")
     return f"Restored {opened} tabs from {path.name}."
+
+
+async def auto_restore_core_session(core: Any) -> str:
+    """Restore directly inside the native browser worker during runtime startup."""
+    context_id = str(getattr(core, "context_id", "") or "").strip()
+    if not context_id:
+        return "Browser session auto-restore skipped: browser context is unavailable."
+
+    ok, reason = should_auto_restore(context_id)
+    if not ok:
+        return reason
+
+    mark_restore_attempt(context_id, state="started", message="Auto-restore started.")
+    try:
+        message = await restore_core_session(core, force=False)
+    except Exception as exc:
+        message = f"Browser session auto-restore failed: {exc}"
+        mark_restore_attempt(context_id, state="failed", message=message, retry=True)
+        raise
+
+    mark_restore_attempt(context_id, state="done", message=message)
+    return message
 
 
 async def _run_with_core(context_id: str, callback: Any, *, create: bool = False) -> str:
@@ -871,16 +896,8 @@ async def auto_restore_runtime_session_for_context(context_id: str) -> str:
     ok, reason = should_auto_restore(context_id)
     if not ok:
         return reason
-    mark_restore_attempt(context_id, state="started", message="Auto-restore started.")
 
     async def callback(core: Any) -> str:
-        return await restore_core_session(core, force=False)
+        return await auto_restore_core_session(core)
 
-    try:
-        message = await _run_with_core_started(context_id, callback, create=True, ensure_started=True)
-        mark_restore_attempt(context_id, state="done", message=message)
-        return message
-    except Exception as exc:
-        message = f"Browser session auto-restore failed: {exc}"
-        mark_restore_attempt(context_id, state="failed", message=message, retry=True)
-        raise
+    return await _run_with_core_started(context_id, callback, create=True, ensure_started=True)

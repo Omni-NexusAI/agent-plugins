@@ -262,6 +262,89 @@ def test_restore_core_session_is_idempotent_and_opens_saved_tabs(tmp_path, monke
     assert len(core.context.added_cookies) == 1
 
 
+def test_runtime_start_restore_registers_all_tabs_before_first_listing(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_sync, "SAVE_DIR", tmp_path)
+    monkeypatch.setattr(session_sync, "boot_id", lambda: "boot-1")
+    monkeypatch.setattr(session_sync, "schedule_save", lambda *args, **kwargs: None)
+    write_snapshot(
+        tmp_path / "global_current.json",
+        {
+            "context_state": {"cookies": [], "origins": []},
+            "tabs": [
+                {"url": "https://first.test"},
+                {"url": "https://second.test"},
+                {"url": "https://third.test"},
+            ],
+        },
+    )
+    core = FakeCore("ctx")
+
+    message = asyncio.run(session_sync.auto_restore_core_session(core))
+    listed_urls = [core.pages[page_id].page.url for page_id in sorted(core.pages)]
+
+    assert "Restored 3 tabs" in message
+    assert listed_urls == ["https://first.test", "https://second.test", "https://third.test"]
+    assert "about:blank" not in listed_urls
+    assert core.last_interacted_browser_id == 1
+    assert session_sync.restore_status("ctx")["state"] == "done"
+    assert asyncio.run(session_sync.auto_restore_core_session(core)) == (
+        "Browser session auto-restore already ran for this boot."
+    )
+
+
+def test_runtime_start_extension_uses_live_core_directly(monkeypatch):
+    root = Path(__file__).resolve().parents[1]
+    extension_path = root / "extensions/python/browser_runtime_started/_50_restore_session.py"
+    extension_spec = importlib.util.spec_from_file_location("browser_runtime_start_restore", extension_path)
+    extension_module = importlib.util.module_from_spec(extension_spec)
+    assert extension_spec.loader is not None
+    extension_spec.loader.exec_module(extension_module)
+
+    calls = []
+
+    async def fake_auto_restore(core):
+        calls.append(core)
+        return "Restored 2 tabs from current.json."
+
+    monkeypatch.setattr(extension_module, "auto_restore_core_session", fake_auto_restore)
+    core = FakeCore("ctx")
+
+    assert asyncio.run(extension_module.BrowserSessionRestoreOnRuntimeStart(agent=None).execute(runtime=core)) is None
+    assert calls == [core]
+
+
+def test_viewer_fallback_is_early_and_cannot_restore_a_consumed_runtime(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_sync, "SAVE_DIR", tmp_path)
+    monkeypatch.setattr(session_sync, "boot_id", lambda: "boot-1")
+    monkeypatch.setattr(session_sync, "schedule_save", lambda *args, **kwargs: None)
+    write_snapshot(
+        tmp_path / "ctx_current.json",
+        {
+            "context_state": {"cookies": [], "origins": []},
+            "tabs": [{"url": "https://one.test"}, {"url": "https://two.test"}],
+        },
+    )
+    core = FakeCore("ctx")
+    assert "Restored 2 tabs" in asyncio.run(session_sync.auto_restore_core_session(core))
+
+    async def fake_run(context_id, callback, *, create=False, ensure_started=False):
+        assert context_id == "ctx"
+        assert create is True
+        assert ensure_started is True
+        return await callback(core)
+
+    monkeypatch.setattr(session_sync, "_run_with_core_started", fake_run)
+    message = asyncio.run(session_sync.auto_restore_runtime_session_for_context("ctx"))
+
+    assert message == "Browser session auto-restore already ran for this boot."
+    assert len(core.pages) == 2
+
+    root = Path(__file__).resolve().parents[1]
+    event_dir = root / "extensions/python/webui_ws_event"
+    assert (event_dir / "_40_browser_session_restore.py").exists()
+    assert not (event_dir / "_50_browser_session_restore.py").exists()
+
+
 def test_auto_restore_tab_limit_does_not_limit_saved_snapshot(tmp_path, monkeypatch):
     monkeypatch.setattr(session_sync, "SAVE_DIR", tmp_path)
     monkeypatch.setattr(session_sync, "schedule_save", lambda *args, **kwargs: None)
@@ -343,12 +426,17 @@ def test_auto_restore_consumed_once_per_boot(tmp_path, monkeypatch):
     monkeypatch.setattr(session_sync, "load_config", lambda: {"auto_restore": True, "auto_save": True, "session_scope": "global"})
 
     calls = []
+    core = FakeCore("ctx")
+
+    async def fake_restore_core_session(_core, *, filename=None, force=False):
+        return "Restored 1 tabs from ctx_current.json."
 
     async def fake_run(context_id, callback, *, create=False, ensure_started=False):
         calls.append((context_id, create, ensure_started))
-        return "Restored 1 tabs from ctx_current.json."
+        return await callback(core)
 
     monkeypatch.setattr(session_sync, "_run_with_core_started", fake_run)
+    monkeypatch.setattr(session_sync, "restore_core_session", fake_restore_core_session)
 
     first = asyncio.run(session_sync.auto_restore_runtime_session_for_context("ctx"))
     second = asyncio.run(session_sync.auto_restore_runtime_session_for_context("ctx"))
@@ -483,6 +571,24 @@ def test_webui_settings_component_uses_native_modal_actions():
     assert 'value="global">Global across chats' in html
     assert 'value="chat">Current chat only' in html
     assert "--color-bg-secondary, #e2e8f0" in html
+
+
+def test_browser_session_prompt_requires_list_before_opening_tabs():
+    root = Path(__file__).resolve().parents[1]
+    prompt_path = root / "extensions/python/system_prompt/_50_browser_session_sync.py"
+    prompt_spec = importlib.util.spec_from_file_location("browser_session_sync_prompt", prompt_path)
+    prompt_module = importlib.util.module_from_spec(prompt_spec)
+    assert prompt_spec.loader is not None
+    prompt_spec.loader.exec_module(prompt_module)
+
+    prompt = []
+    asyncio.run(prompt_module.BrowserSessionSyncPrompt(agent=None).execute(system_prompt=prompt))
+    text = "\n".join(prompt)
+
+    assert 'action: "list"' in text
+    assert "browser_id" in text
+    assert "context id to the `browser` tool" in text
+    assert 'action: "open" merely to discover' in text
 
 
 def test_plugin_config_hooks_normalize_native_modal_settings(monkeypatch):
