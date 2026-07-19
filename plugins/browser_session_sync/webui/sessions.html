@@ -1,0 +1,85 @@
+<html>
+<head>
+    <title>Browser Session Sync</title>
+    <link rel="stylesheet" href="/css/settings.css">
+    <script type="module" src="/plugins/browser_session_sync/webui/config-store.js"></script>
+</head>
+<body>
+    <div x-data="$store.browserSessionSync" x-init="init()">
+        <div class="settings-panel">
+            <h3>Saved Browser Sessions</h3>
+            <p class="settings-desc">These snapshots contain saved Browser tabs, cookies, and localStorage for manual recovery and automatic restore.</p>
+            
+            <div x-show="loading" class="loading-indicator">Loading...</div>
+            <div x-show="!loading && error" class="error-message" x-text="error"></div>
+            
+            <div x-show="!loading && sessions.length === 0 && !error" class="empty-state">
+                No saved browser sessions yet.
+            </div>
+            
+            <div x-show="!loading && sessions.length > 0">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Session File</th>
+                            <th>Context</th>
+                            <th>Tabs</th>
+                            <th>Cookies</th>
+                            <th>Origins</th>
+                            <th>Size</th>
+                            <th>Date</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="(s, i) in sessions" :key="i">
+                            <tr>
+                                <td><code x-text="s.name"></code></td>
+                                <td x-text="s.context_id || '-'"></td>
+                                <td x-text="s.tab_count || 0"></td>
+                                <td x-text="s.cookies"></td>
+                                <td x-text="s.origins"></td>
+                                <td x-text="s.size_str"></td>
+                                <td x-text="s.date_str"></td>
+                                <td>
+                                    <button class="btn btn-danger btn-sm" 
+                                            @click="deleteSession(s.name)"
+                                            :disabled="deleting === s.name">
+                                        <span x-show="deleting !== s.name">Delete</span>
+                                        <span x-show="deleting === s.name">...</span>
+                                    </button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+                
+                <div class="action-bar">
+                    <button class="btn btn-danger" @click="deleteAll" :disabled="deleting === 'all'">
+                        Clear All Sessions
+                    </button>
+                    <button class="btn" @click="loadSessions()" :disabled="loading">
+                        Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <style>
+        .settings-panel { padding: 1.25rem; }
+        .settings-panel h3 { margin: 0 0 0.5rem; }
+        .settings-desc { color: var(--color-text-secondary); margin-bottom: 1.25rem; font-size: 0.9rem; line-height: 1.4; }
+        .loading-indicator, .error-message, .empty-state { padding: 2rem; text-align: center; color: var(--color-text-secondary); }
+        .error-message { color: var(--color-error, #e74c3c); }
+        .data-table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+        .data-table th, .data-table td { border: 1px solid var(--color-border); padding: 0.5rem 0.75rem; text-align: left; }
+        .data-table th { background: var(--color-panel); font-weight: 600; font-size: 0.85rem; }
+        .data-table code { font-size: 0.8rem; word-break: break-all; }
+        .action-bar { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+        .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.8rem; }
+        .btn-danger { background: var(--color-error, #dc3545); color: #fff; border: none; }
+        .btn-danger:hover:not(:disabled) { opacity: 0.85; }
+    </style>
+</body>
+</html>

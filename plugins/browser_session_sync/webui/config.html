@@ -1,0 +1,438 @@
+<html>
+<head>
+    <title>Browser Session Sync</title>
+</head>
+<body>
+    <div x-data='(() => {
+        const DEFAULT_CONFIG = {
+            auto_restore: true,
+            auto_save: true,
+            session_scope: "global",
+            delete_on_chat_remove: true,
+            max_auto_restore_tabs: 0,
+            max_saved_sessions: 500,
+            max_cache_mb: 1024,
+        };
+        const CONFIG_KEYS = Object.keys(DEFAULT_CONFIG);
+        const normalizeConfig = (config = {}) => {
+            const next = { ...DEFAULT_CONFIG, ...config };
+            delete next.enabled;
+            delete next.allow_global_fallback;
+            next.auto_restore = Boolean(next.auto_restore);
+            next.auto_save = Boolean(next.auto_save);
+            next.session_scope = next.session_scope === "chat" ? "chat" : "global";
+            next.delete_on_chat_remove = Boolean(next.delete_on_chat_remove);
+            next.max_auto_restore_tabs = Number(next.max_auto_restore_tabs) || 0;
+            next.max_saved_sessions = Number(next.max_saved_sessions) || DEFAULT_CONFIG.max_saved_sessions;
+            next.max_cache_mb = Number(next.max_cache_mb) || DEFAULT_CONFIG.max_cache_mb;
+            return next;
+        };
+        const cloneConfig = (config) => normalizeConfig(JSON.parse(JSON.stringify(config || DEFAULT_CONFIG)));
+        return {
+            loading: false,
+            sessions: [],
+            stats: null,
+            error: "",
+            deleting: null,
+            expanded: {},
+            lastActionResult: "",
+            parentContext: null,
+            fallbackSettings: cloneConfig(DEFAULT_CONFIG),
+            footerControls: null,
+            configSaving: false,
+
+            get settings() {
+                return this.parentContext?.settings || this.fallbackSettings;
+            },
+
+            get config() {
+                return this.settings;
+            },
+
+            async init(rootEl) {
+                this.parentContext = rootEl?.closest(".modal")?.__pluginSettingsContext || null;
+                this.applyConfig(this.parentContext?.settings || this.fallbackSettings);
+                this.footerControls = {
+                    visible: () => true,
+                    canGoBack: () => !this.loading,
+                    backLabel: () => this.loading ? "Refreshing..." : "Refresh",
+                    note: () => this.lastActionResult || this.error || "",
+                    onBack: () => this.loadSessions({ applyConfig: false }),
+                    showNext: () => false,
+                    showSave: () => true,
+                };
+                if (this.parentContext) {
+                    this.parentContext.wizardFooter = this.footerControls;
+                }
+                await this.loadSessions({ applyConfig: false });
+            },
+
+            cleanup() {
+                if (this.parentContext?.wizardFooter === this.footerControls) {
+                    this.parentContext.wizardFooter = null;
+                }
+            },
+
+            async request(action, payload = {}) {
+                const apiFetch = globalThis.fetchApi;
+                if (!apiFetch) throw new Error("A0 API helper unavailable.");
+                const response = await apiFetch("/plugins/browser_session_sync/sessions_list", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action, ...payload })
+                });
+                return await response.json();
+            },
+
+            applyConfig(config, { updateDraft = true } = {}) {
+                const normalized = normalizeConfig(config);
+                if (this.parentContext) {
+                    this.parentContext.settings = normalized;
+                } else {
+                    this.fallbackSettings = normalized;
+                }
+            },
+
+            hasUnsavedChanges() {
+                return CONFIG_KEYS.some((key) => this.config[key] !== this.settings[key]);
+            },
+
+            resetDraft() {
+                this.error = "";
+                this.lastActionResult = "Changes reset";
+            },
+
+            async loadConfig() {
+                try {
+                    const data = await this.request("get_config");
+                    if (data.ok !== false && data.config) {
+                        this.applyConfig(data.config);
+                    }
+                } catch (e) {
+                    this.error = e.message || "Failed to load settings";
+                }
+            },
+
+            async saveConfig() {
+                this.configSaving = true;
+                this.error = "";
+                this.lastActionResult = "";
+                const draft = cloneConfig(this.settings);
+                try {
+                    const data = await this.request("save_config", { config: draft });
+                    if (data.ok !== false && data.config) {
+                        this.applyConfig(data.config);
+                        this.lastActionResult = "Settings saved";
+                        await this.loadSessions({ applyConfig: false });
+                    } else {
+                        this.applyConfig(draft);
+                        this.error = data.error || "Failed to save settings";
+                    }
+                } catch (e) {
+                    this.applyConfig(draft);
+                    this.error = e.message || "Failed to save settings";
+                } finally {
+                    this.configSaving = false;
+                }
+            },
+
+            async loadSessions({ applyConfig = true } = {}) {
+                this.loading = true;
+                this.error = "";
+                try {
+                    const data = await this.request("list");
+                    if (data.ok !== false) {
+                        this.sessions = data.sessions || [];
+                        this.stats = data.stats || null;
+                        if (applyConfig && data.config) {
+                            this.applyConfig(data.config, { updateDraft: !this.hasUnsavedChanges() });
+                        }
+                    } else {
+                        this.error = data.error || "Failed to load sessions";
+                    }
+                } catch (e) {
+                    this.error = e.message || "Failed to load sessions";
+                } finally {
+                    this.loading = false;
+                }
+            },
+
+            async deleteSession(filename) {
+                this.deleting = filename;
+                this.error = "";
+                try {
+                    const data = await this.request("delete", { filename });
+                    if (data.ok !== false) {
+                        this.lastActionResult = `Deleted ${filename}`;
+                        await this.loadSessions({ applyConfig: false });
+                    } else {
+                        this.error = data.error || "Delete failed";
+                    }
+                } catch (e) {
+                    this.error = e.message || "Delete failed";
+                } finally {
+                    this.deleting = null;
+                }
+            },
+
+            async deleteAll() {
+                if (!confirm("Delete all saved browser session snapshots?")) return;
+                this.deleting = "all";
+                this.error = "";
+                try {
+                    const data = await this.request("delete_all");
+                    if (data.ok !== false) {
+                        this.lastActionResult = `Cleared ${data.deleted || 0} sessions`;
+                        await this.loadSessions({ applyConfig: false });
+                    } else {
+                        this.error = data.error || "Clear all failed";
+                    }
+                } catch (e) {
+                    this.error = e.message || "Clear all failed";
+                } finally {
+                    this.deleting = null;
+                }
+            },
+
+            toggleDetails(name) {
+                this.expanded[name] = !this.expanded[name];
+            },
+
+            getHostname(url) {
+                if (!url) return "(empty)";
+                try {
+                    return new URL(url).hostname;
+                } catch {
+                    return url.substring(0, 80);
+                }
+            },
+
+            restoreLimitLabel() {
+                return this.settings.max_auto_restore_tabs > 0
+                    ? `${this.settings.max_auto_restore_tabs} tabs`
+                    : "Native browser limit";
+            },
+
+            storageLabel() {
+                const size = this.stats?.total_size_str || "0 B";
+                return `${size} / ${this.config.max_cache_mb} MB`;
+            }
+        };
+    })()' x-init="init($el)" x-destroy="cleanup()">
+        <div class="plugin-settings-section">
+            <div class="header-row">
+                <div>
+                    <h3>Browser Session Cache</h3>
+                    <p class="plugin-settings-desc">
+                        Saves native Browser tabs, cookies, and localStorage. The plugin itself is enabled or disabled from the parent plugin menu.
+                    </p>
+                </div>
+            </div>
+
+            <div x-show="error" class="error-message" x-text="error"></div>
+            <div x-show="lastActionResult" class="action-result" x-text="lastActionResult"></div>
+
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <span class="summary-label">Stored sessions</span>
+                    <strong x-text="stats?.total_files ?? 0"></strong>
+                    <small x-text="`Limit ${config.max_saved_sessions}`"></small>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">Storage</span>
+                    <strong x-text="storageLabel()"></strong>
+                    <small>Oldest snapshots are removed first.</small>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">Latest current tabs</span>
+                    <strong x-text="stats?.global_current?.tab_count ?? 0"></strong>
+                    <small x-text="stats?.global_current?.context_id ? `Context ${stats.global_current.context_id}` : 'No current snapshot'"></small>
+                </div>
+            </div>
+
+            <section class="settings-panel">
+                <div class="panel-header">
+                    <h4>Behavior</h4>
+                </div>
+                <label class="toggle-row">
+                    <input type="checkbox" x-model="settings.auto_restore" />
+                    <span>
+                        <strong>Auto-restore when Browser opens</strong>
+                        <small>Runs once per A0 boot for the selected session scope.</small>
+                    </span>
+                </label>
+                <label class="toggle-row">
+                    <input type="checkbox" x-model="settings.auto_save" />
+                    <span>
+                        <strong>Auto-save live browser state</strong>
+                        <small>Debounced saves track loads and closed tabs.</small>
+                    </span>
+                </label>
+                <label class="select-control">
+                    <span>Session scope</span>
+                    <select x-model="settings.session_scope">
+                        <option value="global">Global across chats</option>
+                        <option value="chat">Current chat only</option>
+                    </select>
+                    <small>Global is the default and restores the latest browser state from any chat.</small>
+                </label>
+                <label class="toggle-row">
+                    <input type="checkbox" x-model="settings.delete_on_chat_remove" />
+                    <span>
+                        <strong>Delete cache when chat is removed</strong>
+                        <small>Only removes per-chat snapshots; global current state is preserved.</small>
+                    </span>
+                </label>
+            </section>
+
+            <section class="settings-panel">
+                <h4>Cache Management</h4>
+                <div class="control-grid">
+                    <label class="number-control">
+                        <span>Automatic restore limit</span>
+                        <input type="number" x-model.number="settings.max_auto_restore_tabs" min="0" max="100" step="1" />
+                        <small x-text="restoreLimitLabel()"></small>
+                    </label>
+                    <label class="number-control">
+                        <span>Saved sessions to keep</span>
+                        <input type="number" x-model.number="settings.max_saved_sessions" min="1" max="5000" step="1" />
+                        <small>Retention runs after saves and settings changes.</small>
+                    </label>
+                    <label class="number-control">
+                        <span>Maximum cache size</span>
+                        <input type="number" x-model.number="settings.max_cache_mb" min="1" max="102400" step="1" />
+                        <small>Measured in MB.</small>
+                    </label>
+                </div>
+            </section>
+
+            <section class="settings-panel">
+                <div class="panel-header">
+                    <h4>Saved Sessions</h4>
+                    <button class="btn btn-danger" @click="deleteAll" :disabled="loading || deleting === 'all'">
+                        <span x-show="deleting !== 'all'">Clear All</span>
+                        <span x-show="deleting === 'all'">Clearing...</span>
+                    </button>
+                </div>
+
+                <div x-show="loading && sessions.length === 0" class="loading-indicator">Loading sessions...</div>
+                <div x-show="!loading && sessions.length === 0 && !error" class="empty-state">
+                    No saved browser sessions yet.
+                </div>
+
+                <div x-show="sessions.length > 0" class="table-wrap">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Session</th>
+                                <th>Context</th>
+                                <th>Tabs</th>
+                                <th>Storage</th>
+                                <th>Saved</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="s in sessions" :key="s.name">
+                                <tr>
+                                    <td>
+                                        <div class="session-title">
+                                            <button class="btn-view" @click="toggleDetails(s.name)" x-text="expanded[s.name] ? '-' : '+'"></button>
+                                            <code x-text="s.name"></code>
+                                        </div>
+                                        <div class="badges">
+                                            <span x-show="s.is_current" class="badge">Current</span>
+                                            <span x-show="s.is_global_current" class="badge">Global latest</span>
+                                        </div>
+                                        <div x-show="expanded[s.name]" class="session-details">
+                                            <div x-show="s.tab_count > 0">
+                                                <strong>Tabs</strong>
+                                                <ul class="tabs-list">
+                                                    <template x-for="(tab, idx) in s.tabs" :key="idx">
+                                                        <li>
+                                                            <span class="tab-host" x-text="getHostname(tab.url)"></span>
+                                                            <span class="tab-title" x-text="tab.title || '(no title)'"></span>
+                                                            <span class="tab-url" x-text="tab.url"></span>
+                                                        </li>
+                                                    </template>
+                                                </ul>
+                                            </div>
+                                            <div x-show="s.tab_count === 0" class="legacy-note">
+                                                No saved tabs in this snapshot.
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td x-text="s.context_id || '-'"></td>
+                                    <td x-text="s.tab_count || 0"></td>
+                                    <td>
+                                        <span x-text="s.size_str"></span>
+                                        <small x-text="`${s.cookies} cookies, ${s.origins} origins`"></small>
+                                    </td>
+                                    <td x-text="s.date_str"></td>
+                                    <td>
+                                        <button class="btn btn-danger btn-sm" @click="deleteSession(s.name)" :disabled="deleting === s.name">
+                                            <span x-show="deleting !== s.name">Delete</span>
+                                            <span x-show="deleting === s.name">...</span>
+                                        </button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <style>
+        .plugin-settings-section { padding: 1.25rem; color: var(--color-text-primary); }
+        .header-row, .panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+        .plugin-settings-section h3 { margin: 0 0 0.4rem; }
+        .plugin-settings-section h4 { margin: 0 0 0.75rem; font-size: 0.85rem; color: var(--color-text-secondary); text-transform: uppercase; }
+        .plugin-settings-desc { color: var(--color-text-secondary); margin: 0 0 1rem; font-size: 0.9rem; line-height: 1.4; }
+        .summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+        .summary-item, .settings-panel { background: var(--color-panel); border: 1px solid var(--color-border); border-radius: 4px; padding: 0.85rem 1rem; }
+        .summary-label, .number-control span { display: block; color: var(--color-text-secondary); font-size: 0.78rem; margin-bottom: 0.35rem; }
+        .summary-item strong { display: block; font-size: 1.05rem; }
+        small { display: block; color: var(--color-text-secondary); font-size: 0.75rem; line-height: 1.35; margin-top: 0.2rem; }
+        .settings-panel { margin-bottom: 1rem; }
+        .toggle-row { display: flex; align-items: flex-start; gap: 0.65rem; margin: 0.75rem 0; }
+        .toggle-row input { margin-top: 0.2rem; }
+        .toggle-row strong { display: block; font-size: 0.9rem; }
+        .control-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; }
+        .number-control input, .select-control select { width: 100%; box-sizing: border-box; min-height: 2rem; }
+        .select-control { display: block; margin: 0.8rem 0; }
+        .select-control > span { display: block; color: var(--color-text-secondary, #4b5563); font-size: 0.78rem; margin-bottom: 0.35rem; }
+        .settings-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
+        .action-result { padding: 0.5rem 0.75rem; margin-bottom: 0.75rem; background: var(--color-success-bg, #d4edda); color: var(--color-success, #155724); border-radius: 4px; font-size: 0.85rem; }
+        .error-message { padding: 0.5rem 0.75rem; margin-bottom: 0.75rem; color: var(--color-error, #e74c3c); border: 1px solid var(--color-error, #e74c3c); border-radius: 4px; }
+        .table-wrap { overflow-x: auto; }
+        .data-table { width: 100%; border-collapse: collapse; }
+        .data-table th, .data-table td { border: 1px solid var(--color-border); padding: 0.5rem; text-align: left; font-size: 0.82rem; vertical-align: top; }
+        .data-table th { background: var(--color-bg-secondary); font-weight: 600; }
+        .data-table code { font-size: 0.75rem; word-break: break-all; }
+        .session-title { display: flex; align-items: center; gap: 0.35rem; }
+        .btn-view { border: 1px solid var(--color-border); background: var(--color-bg-secondary); border-radius: 4px; width: 1.4rem; height: 1.4rem; cursor: pointer; }
+        .badges { display: flex; gap: 0.3rem; margin-top: 0.35rem; flex-wrap: wrap; }
+        .badge { border: 1px solid var(--color-border); border-radius: 3px; padding: 0.08rem 0.35rem; font-size: 0.68rem; color: var(--color-text-secondary); }
+        .session-details { margin-top: 0.5rem; padding: 0.5rem; background: var(--color-bg-secondary); border-radius: 4px; max-height: 260px; overflow-y: auto; }
+        .tabs-list { margin: 0.35rem 0 0; padding-left: 1rem; }
+        .tabs-list li { margin-bottom: 0.4rem; }
+        .tab-host, .tab-title, .tab-url { display: block; word-break: break-word; }
+        .tab-host { font-weight: 600; }
+        .tab-title { color: var(--color-text-primary); }
+        .tab-url { color: var(--color-text-secondary); font-size: 0.72rem; }
+        .legacy-note, .loading-indicator, .empty-state { color: var(--color-text-secondary); padding: 1rem; text-align: center; }
+        .btn { padding: 0.4rem 0.75rem; border: 1px solid var(--color-border, #94a3b8); background: var(--color-bg-secondary, #e2e8f0); color: var(--color-text-primary, #111827); border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600; }
+        .btn:hover:not(:disabled) { opacity: 0.85; }
+        .btn:disabled { opacity: 0.65; cursor: not-allowed; background: var(--color-bg-muted, #cbd5e1); color: var(--color-text-secondary, #475569); }
+        .btn-primary { background: var(--color-accent, #2563eb); color: #fff; border-color: transparent; }
+        .btn-danger { background: var(--color-error, #dc3545); color: #fff; border-color: transparent; }
+        .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.78rem; }
+        @media (max-width: 860px) {
+            .summary-grid, .control-grid { grid-template-columns: 1fr; }
+            .header-row, .panel-header { flex-direction: column; }
+        }
+    </style>
+</body>
+</html>

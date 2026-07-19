@@ -1,0 +1,7 @@
+auto_restore: true
+auto_save: true
+session_scope: global
+delete_on_chat_remove: true
+max_auto_restore_tabs: 0
+max_saved_sessions: 500
+max_cache_mb: 1024
