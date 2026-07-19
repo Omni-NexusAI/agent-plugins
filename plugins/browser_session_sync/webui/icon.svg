@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Browser Session Sync</title>
+  <desc id="desc">A globe silhouette with a save badge above it.</desc>
+  <defs>
+    <linearGradient id="badge" x1="76" y1="24" x2="180" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#34d399"/>
+      <stop offset="1" stop-color="#0ea5e9"/>
+    </linearGradient>
+  </defs>
+  <circle cx="128" cy="144" r="76" fill="#0f172a"/>
+  <path d="M52 144h152M128 68c22 22 34 49 34 76s-12 54-34 76M128 68c-22 22-34 49-34 76s12 54 34 76" fill="none" stroke="#f8fafc" stroke-width="12" stroke-linecap="round"/>
+  <path d="M70 104c16 8 35 12 58 12s42-4 58-12M70 184c16-8 35-12 58-12s42 4 58 12" fill="none" stroke="#94a3b8" stroke-width="10" stroke-linecap="round"/>
+  <path d="M82 24h84l28 28v78c0 9-7 16-16 16H82c-9 0-16-7-16-16V40c0-9 7-16 16-16z" fill="url(#badge)" stroke="#f8fafc" stroke-width="10" stroke-linejoin="round"/>
+  <path d="M94 24v44h58V24M96 104h68v42H96z" fill="#0f172a" opacity=".9"/>
+  <path d="M110 122h40" stroke="#f8fafc" stroke-width="10" stroke-linecap="round"/>
+</svg>
