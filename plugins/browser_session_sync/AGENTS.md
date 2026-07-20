@@ -18,6 +18,7 @@ This plugin persists native Agent Zero Browser tabs, cookies, and localStorage a
 - `auto_restore`, `auto_save`, restore scope, chat-delete cleanup, auto-restore tab limits, and cache retention remain independently configurable.
 - The settings component must be self-contained per modal mount; do not depend on a global Alpine store or module script execution inside A0's injected `config.html`.
 - Settings fields must bind to the parent A0 modal `context.settings`; the native modal `Default` and `Save` buttons are authoritative, while plugin-local controls may only manage cache/session actions such as refresh or delete.
+- Keep `thumbnail.png` at the plugin root for marketplace/source catalog use and `webui/thumbnail.png` for installed-plugin UI display.
 
 ## Verification
 

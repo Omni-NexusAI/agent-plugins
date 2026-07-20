@@ -3,8 +3,8 @@
 Work-in-progress Agent Zero plugin that preserves native Browser tabs, cookies,
 and localStorage across hard container restarts.
 
-Includes a plugin icon at `webui/icon.svg` for plugin managers and marketplace
-surfaces.
+Includes a plugin thumbnail at `webui/thumbnail.png` for installed plugin
+lists and a matching root `thumbnail.png` for marketplace/catalog surfaces.
 
 ## Behavior
 
