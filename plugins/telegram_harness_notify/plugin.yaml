@@ -1,0 +1,8 @@
+name: telegram_harness_notify
+title: Telegram Harness Notify
+description: Sends Telegram notifications when the Agent Harness creates a checkpoint or blocks a risky action. Portable plugin - install on any Agent Zero instance for checkpoint telemetry.
+version: 1.0.0
+settings_sections: []
+per_project_config: false
+per_agent_config: false
+always_enabled: false
