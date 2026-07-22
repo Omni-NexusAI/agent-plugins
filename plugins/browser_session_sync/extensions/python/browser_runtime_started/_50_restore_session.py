@@ -17,5 +17,8 @@ class BrowserSessionRestoreOnRuntimeStart(Extension):
     ) -> None:
         if runtime is None:
             return
-        message = await auto_restore_core_session(runtime)
-        print(f"[browser_session_sync] runtime startup: {message}")
+        try:
+            message = await auto_restore_core_session(runtime)
+            print(f"[browser_session_sync] runtime startup: {message}")
+        except Exception as exc:
+            print(f"[browser_session_sync] runtime startup restore skipped: {exc}")
