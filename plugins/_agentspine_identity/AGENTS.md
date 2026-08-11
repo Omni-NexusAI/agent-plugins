@@ -2,38 +2,51 @@
 
 ## Purpose
 
-`_agentspine_identity` is the built-in Agentspine branding and identity overlay. It keeps the host runtime close to upstream Agent Zero while applying Agentspine product naming, greeting text, banners, document title, and version labels at runtime.
+`_agentspine_identity` owns Agentspine product identity, release-banner display,
+initial greeting branding, and visible UI text rewrites.
 
 ## Ownership
 
-- `plugin.yaml` owns the installed plugin identity and `0.9.9` version.
-- `default_config.yaml` owns product names, release prefixes, compatibility label, and release-tag defaults.
-- `helpers/identity.py` owns Python-side text replacement, release-tag normalization, timestamp formatting, and display-version formatting.
-- `extensions/python/agent_init/_10_initial_message.py` owns the branded first message for agent `0` when the context log is empty.
-- `extensions/python/banners/_95_agentspine_identity.py` owns banner text replacement.
-- `extensions/python/_functions/helpers/ui_server/UiRouteHandlers/serve_index/end/_10_agentspine_index_identity.py` owns server-side index HTML/title/version rewriting.
-- `extensions/webui/page-head/_10_agentspine_identity.html` owns browser-side DOM, title, sidebar version, and attribute text replacement.
+- `default_config.yaml` owns product names, banner prefixes, compatibility
+  labels, and release-tag defaults.
+- `helpers/identity.py` owns backend identity configuration, version formatting,
+  and protected text replacement rules.
+- `extensions/python/agent_init/_10_initial_message.py` owns the branded initial
+  main-agent greeting.
+- `extensions/python/banners/_95_agentspine_identity.py` owns backend banner
+  text rewrites.
+- `extensions/python/_functions/helpers/ui_server/UiRouteHandlers/serve_index/end/_10_agentspine_index_identity.py`
+  owns served-index title and `globalThis.gitinfo` patching.
+- `extensions/webui/page-head/_10_agentspine_identity.html` owns browser-side
+  title, sidebar version label, and late-rendered UI text rewrites.
 
 ## Local Contracts
 
-- Preserve protected phrases such as `Agent Zero Venice`.
-- Keep Python and WebUI replacement tables aligned when adding or changing identity strings.
-- Keep release-tag behavior aligned between `default_config.yaml`, `helpers/identity.py`, and the index/page-head hooks.
-- The default development banner prefix is `D`; do not change it without updating docs and config together.
-- Imports depend on the installed directory name `plugins._agentspine_identity`; do not rename the folder without updating imports.
+- Keep backend and frontend replacement tables aligned.
+- Preserve protected phrases when "Agent Zero" is part of a proper name.
+- Use development/pre banner prefix `D` only for `-pre`/development tags and
+  main/full release prefix `M` for the non-pre 9.9 standard and CUDA tags.
+- The plugin is enabled only when the Spine release image explicitly supplies
+  both `AGENTSPINE_RELEASE=9.9` and `AGENTSPINE_IDENTITY_ENABLED=true`.
+  Keep those gates out of A0/v2.7 custom-plugin deployments.
+- Do not rewrite script, style, code, pre, textarea, or input content.
 
 ## Work Guidance
 
-- Text replacement must be idempotent and safe when hooks run repeatedly.
-- DOM replacement must skip script/style/code/pre/textarea/input content.
-- Server-side index rewriting should preserve existing explicit `D`, `M`, or `AS` display labels.
-- Branding should be broad enough for runtime surfaces but narrow enough to avoid corrupting protected product names.
+- Add release variants in both `default_config.yaml` and the helper/index-hook
+  variant resolver. Compose must provide `BUILD_VARIANT=standard` or `cuda` so
+  the browser label reflects the actual same-revision release target.
+- Add identity text replacements in `helpers/identity.py` and mirror browser
+  equivalents in the page-head hook.
+- Keep DOM rewrite scopes narrow enough to avoid unnecessary page churn.
 
 ## Verification
 
 - Parse touched Python files.
-- Load the WebUI and verify document title, sidebar version, first-run message, banners, and visible Agent Zero strings are rewritten as expected.
-- Verify protected phrases remain unchanged.
+- Confirm the browser title, sidebar version label, and fresh-chat greeting are
+  branded correctly.
+- Confirm late-rendered modals/toasts are rewritten without touching protected
+  phrases.
 
 ## Child DOX Index
 

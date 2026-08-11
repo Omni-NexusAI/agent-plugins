@@ -6,12 +6,12 @@ from pathlib import Path
 from helpers.extension import Extension
 
 
-def _load_overlay_helper():
+def _source_helper():
     plugin_root = Path(__file__).resolve().parents[3]
-    helper_path = plugin_root / "helpers" / "overlay.py"
-    spec = importlib.util.spec_from_file_location("agentspine_multi_source_overlay", helper_path)
+    helper_path = plugin_root / "helpers" / "source.py"
+    spec = importlib.util.spec_from_file_location("agentspine_multi_source_updater_agent", helper_path)
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"Unable to load multi-source updater overlay helper from {helper_path}")
+        raise RuntimeError("Multi Source Updater helper is unavailable")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -19,9 +19,7 @@ def _load_overlay_helper():
 
 class MultiSourceUpdaterInit(Extension):
     def execute(self, **kwargs):
-        changed = _load_overlay_helper().apply_overrides()
+        helper = _source_helper()
+        helper.patch_self_update()
         if getattr(self, "agent", None):
-            self.agent.set_data(
-                "multi_source_updater_plugin",
-                {"loaded": True, "overrides_changed": changed},
-            )
+            self.agent.set_data("agentspine_update_source", helper.get_active_source_key())

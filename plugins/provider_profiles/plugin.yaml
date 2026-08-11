@@ -1,6 +1,6 @@
 name: provider_profiles
 title: Provider Profiles
 description: Remembers your last-used model per provider, auto-fills local-provider API bases (LM Studio, Ollama), and restores provider-specific model selections when switching providers.
-version: 1.0.1
+version: 1.0.2
 settings_sections:
   - agent

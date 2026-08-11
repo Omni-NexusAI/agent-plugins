@@ -1,7 +1,7 @@
 name: _multi_source_updater
 title: Multi Source Updater
-description: Extends self-update with update source selection and Agentspine v0.9.9-pre compatibility behavior.
-version: 0.9.9
+description: Extends self-update with update source selection in Agent Spine.
+version: 1.0.0
 always_enabled: true
 settings_sections:
   - backup

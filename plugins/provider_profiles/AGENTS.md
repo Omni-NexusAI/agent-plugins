@@ -12,6 +12,11 @@
 
 - `README.md` owns user-facing behavior and compatibility.
 - `default_config.yaml` owns storage keys, local-provider defaults, and stale-model clearing behavior.
+- `webui/config.html` owns the user-editable storage key, local provider defaults, and stale-model policy.
+- `webui/thumbnail.svg` is the canonical blue-server Provider Profiles icon
+  (SHA-256 `100083e05d213c528dd7a5ececbdec0d427d9b1628a55e28f14a05b7b14ad877`)
+  shared with the Spine built-in package; do not restore the archived
+  three-slider asset.
 - WebUI/runtime extension files own patching of `_model_config` / `modelConfig` behavior when available.
 
 ## Local Contracts
@@ -28,6 +33,8 @@
 - Keep provider history storage key configurable.
 - Preserve unknown model/provider fields when saving history.
 - Keep local-provider defaults in config and docs aligned.
+- Use Alpine's public `$data(element)` context for preset-editor model fields;
+  retain settings-context fallback for older direct-settings layouts.
 
 ## Verification
 

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 import re
@@ -6,24 +6,20 @@ import re
 from helpers.extension import Extension
 from plugins._agentspine_identity.helpers.identity import (
     apply_identity_text,
-    default_release_tag,
     format_display_version,
-    get_identity_config,
+    is_identity_enabled,
+    release_tag_for_variant,
 )
 
 
 def _current_release_tag() -> str:
-    config = get_identity_config()
-    release_tags = config.get("release_tags") if isinstance(config, dict) else None
-    release_tags = release_tags if isinstance(release_tags, dict) else {}
-    variant = os.getenv("BUILD_VARIANT", "").strip().lower()
-    if variant in {"fullgpu", "gpu"}:
-        return str(release_tags.get("gpu_pre") or "v0.9.9-gpu-pre")
-    return str(release_tags.get("standard_pre") or default_release_tag())
+    return release_tag_for_variant(os.getenv("BUILD_VARIANT"))
 
 
 class AgentspineIndexIdentity(Extension):
     def execute(self, data: dict | None = None, **kwargs):
+        if not is_identity_enabled():
+            return
         if not isinstance(data, dict):
             return
         result = data.get("result")
@@ -36,7 +32,7 @@ class AgentspineIndexIdentity(Extension):
             display = format_display_version(
                 _current_release_tag(),
                 commit_time,
-                None if current_version.startswith(("D ", "M ", "AS ")) else current_version,
+                None,
             )
             return f'globalThis.gitinfo = {{ version: "{display}", commit_time: "{commit_time}" }};'
 
@@ -47,4 +43,8 @@ class AgentspineIndexIdentity(Extension):
             count=1,
         )
         result = result.replace("<title>Agent Zero</title>", "<title>Agentspine</title>")
-        data["result"] = apply_identity_text(result)
+        data["result"] = apply_identity_text(result).replace(
+            "</head>",
+            "<script>globalThis.agentspineIdentityEnabled = true;</script></head>",
+            1,
+        )

@@ -1,56 +1,75 @@
 # Multi Source Updater
 
-Built-in Agentspine self-update enhancement plugin.
-
-This directory is synced from the `agentspine-gpu-pre` container state on
-2026-06-15. The manifest version is `0.9.9` and the installed plugin name is
-`_multi_source_updater`.
+Agent Spine built-in self-update source overlay.
 
 ## Purpose
 
-The plugin provides the Agentspine updater enhancement boundary:
+`_multi_source_updater` provides the Agent Spine-owned update source selector.
+It ships in both standard and CUDA images and is never included in an Agent Zero
+custom-plugin deployment. It adapts the runtime self-update discovery APIs and
+the existing self-update UI without editing Agent Zero source files.
 
-- selecting update source between Omni-NexusAI and agent0ai;
-- preserving the selected update source in persisted settings;
-- providing Agentspine v0.9.9-pre compatibility display behavior.
+## Runtime Design
 
-## Design
+- `default_config.yaml` establishes the explicit, persisted default source.
+- `helpers/source.py` owns source normalization, remote/tag discovery, runtime
+  updater adaptation, and the truthfulness gate for bootstrap execution.
+- `extensions/python/startup_migration/_10_multi_source_updater.py` applies the
+  adapter before self-update API routes are used; the agent-init hook repeats
+  that idempotently for later host lifecycle paths.
+- `api/source.py` saves the selected source through the supported plugin config
+  API while retaining unrelated config keys.
+- `webui/config.html` exposes the same persisted source selector from the
+  plugin’s Settings action.
+- `extensions/webui/page-head/_10_multi_source_updater.html` injects one
+  source selector into the host's existing Advanced self-update panel.
+- `webui/thumbnail.svg` is present for plugin catalog consistency.
 
-In the live GPU container, updater behavior is baked into core helper, settings,
-and WebUI files. The monorepo plugin vendors those files under `overrides/a0`
-and applies them on agent startup.
+## Intended Behavior Contract
 
-- `extensions/python/agent_init/_10_multi_source_updater.py` applies the
-  override payload and records changed files on the agent.
-- `helpers/overlay.py` copies changed files from `overrides/a0` into the runtime
-  root.
-- `overrides/a0/helpers/self_update.py` contains update-source selection logic.
-- `overrides/a0/helpers/settings.py` contains the `self_update_source` setting
-  and updater cache invalidation behavior.
-- `overrides/a0/webui/components/settings/external/` contains the self-update
-  store and modal with the update-source selector.
+Behavior represented by this plugin should stay limited to update source
+selection and source-aware version display:
 
-## Function
+- Allow selecting between the Omni-NexusAI Agent Spine source and the upstream
+  agent0ai source.
+- Persist the selected source in settings.
+- Use the selected source when listing tags, dry-running updates, or resolving
+  update remotes.
+- List source-appropriate tags: Agent Spine `vX.Y.Z-standard|cuda[-pre]` tags
+  for Omni-NexusAI, and upstream `vX.Y` tags for agent0ai.
 
-After startup applies the payload, the self-update flow behaves like the GPU
-container:
+## Bootstrap Execution Boundary
 
-- update sources are `omni-nexusai` and `agent0ai`;
-- default source is `omni-nexusai`;
-- `self_update_source` is persisted in settings;
-- remote URL selection follows the active source;
-- release/tag listing follows the active source;
-- Omni-NexusAI source uses Agentspine preview display behavior;
-- self-update caches are invalidated when the source changes.
+The A0 v2.7 self-update manager starts before plugins load and receives its
+remote through `A0_SELF_UPDATE_REMOTE_URL`. This plugin never edits `/exe` or
+host files to override that behavior. The selected source is always persisted
+and immediately governs discovery, status, branch choices, and tag choices.
+Scheduling is allowed only when the selected upstream remote matches the image
+manager; Agent Spine package updates are explicitly blocked by this v2.7
+manager because it accepts upstream `vX.Y` targets only. The UI reports this
+limitation before it can queue a misleading restart request.
 
-## Current Limits
+## Safe Extension Points
 
-The override payload intentionally matches the GPU container. It is more
-invasive than a pure extension because self-update behavior currently depends on
-core helper and settings files.
+- Add backend updater-source helpers under `helpers/`.
+- Add migration logic to the existing agent-init hook for old settings shapes.
+- Add WebUI patches under `extensions/webui` if the update settings page needs
+  source controls that cannot be supplied by core settings metadata.
 
-## Verification
+## Compatibility Notes
 
-- Parse the Python extension, helper, and override Python files.
-- Verify source selection persistence, display labels, fallback behavior, and
-  unsupported host behavior.
+- Do not change the default update source without an explicit release decision.
+- Keep source-specific remote URLs explicit in status/dry-run payloads so agents
+  can verify the selected source without external context.
+- Preserve upstream update compatibility when the selected source is `agent0ai`.
+- Keep the plugin underscore-prefixed because this is a built-in overlay.
+
+## Verification Checklist
+
+- Compile the plugin Python files.
+- Confirm startup and agent-init load the source adapter without errors.
+- In Advanced self-update settings, select each source and verify the choice
+  persists after closing and reopening the modal.
+- Confirm each selection refreshes the visible remote/branch/tag context.
+- Confirm a request cannot be scheduled when the bootstrap manager would use a
+  different remote or unsupported Agent Spine tag format.

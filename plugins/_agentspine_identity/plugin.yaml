@@ -1,5 +1,5 @@
 name: _agentspine_identity
 title: Agentspine Identity Module
 description: Agentspine identity overlay for A0-compatible branding and release banner behavior.
-version: 0.9.9
-always_enabled: true
+version: 1.0.0
+always_enabled: false

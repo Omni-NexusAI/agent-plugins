@@ -1,0 +1,48 @@
+{
+  "hello": {
+    "protocolVersion": "ailink.v1",
+    "messageType": "hello",
+    "sessionId": "example-session",
+    "timestampMs": 0,
+    "sequence": 0,
+    "payloadFormat": "json",
+    "payload": {
+      "clientName": "AI-Link Unity",
+      "captureMode": "Auto",
+      "protocolVersion": "ailink.v1",
+      "sessionId": "example-session"
+    }
+  },
+  "streamStart": {
+    "protocolVersion": "ailink.v1",
+    "messageType": "stream.start",
+    "sessionId": "example-session",
+    "timestampMs": 0,
+    "sequence": 1,
+    "payloadFormat": "json",
+    "payload": {
+      "captureMode": "Auto",
+      "codec": "H264",
+      "width": 1280,
+      "height": 720,
+      "fps": 30
+    }
+  },
+  "stats": {
+    "protocolVersion": "ailink.v1",
+    "messageType": "stats",
+    "sessionId": "example-session",
+    "timestampMs": 0,
+    "sequence": 10,
+    "payloadFormat": "json",
+    "payload": {
+      "reconnectCount": 0,
+      "droppedFrames": 0,
+      "videoFramesSent": 10,
+      "audioFramesSent": 20,
+      "networkLatencyMs": 15.0,
+      "audioLatencyMs": 22.0,
+      "videoLatencyMs": 31.0
+    }
+  }
+}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -10,16 +11,24 @@ PLUGIN_DIR = Path(__file__).resolve().parents[1]
 DEFAULTS = {
     "product_name": "Agentspine",
     "short_name": "AS",
-    "banner_prefix": "D",
+    "banner_prefix": "M",
     "main_release_prefix": "M",
     "development_prefix": "D",
     "compatibility_label": "A0-compatible",
-    "default_release_tag": "v0.9.9-standard-pre",
+    "default_release_tag": "v0.9.9-standard",
 }
 
 PROTECTED_PHRASES = {
     "Agent Zero Venice": "__AS_IDENTITY_AGENT_ZERO_VENICE__",
 }
+
+
+def is_identity_enabled() -> bool:
+    """Identity is an explicit Spine 9.9 release feature, never an A0 shim."""
+    return (
+        os.getenv("AGENTSPINE_RELEASE", "").strip() == "9.9"
+        and os.getenv("AGENTSPINE_IDENTITY_ENABLED", "").strip().lower() == "true"
+    )
 
 REPLACEMENTS = (
     ("Agent-Zero", "Agentspine"),
@@ -72,6 +81,25 @@ def default_release_tag() -> str:
     return str(get_identity_config().get("default_release_tag") or DEFAULTS["default_release_tag"])
 
 
+def release_tag_for_variant(variant: str | None = None) -> str:
+    """Resolve an identity label from the explicit Compose build variant."""
+    config = get_identity_config()
+    release_tags = config.get("release_tags")
+    release_tags = release_tags if isinstance(release_tags, dict) else {}
+    normalized = str(variant or "").strip().lower()
+    if normalized in {"cuda", "gpu", "fullgpu"}:
+        return str(
+            release_tags.get("gpu")
+            or release_tags.get("gpu_pre")
+            or "v0.9.9-gpu"
+        )
+    return str(
+        release_tags.get("standard")
+        or release_tags.get("standard_pre")
+        or default_release_tag()
+    )
+
+
 def normalize_release_tag(version_id: str | None) -> str:
     raw = (version_id or "").strip()
     if not raw:
@@ -79,6 +107,11 @@ def normalize_release_tag(version_id: str | None) -> str:
     if raw == "v0.9.9-pre":
         return default_release_tag()
     return raw
+
+
+def _is_development_release(tag: str) -> bool:
+    normalized = tag.strip().lower()
+    return normalized.endswith("-pre") or "-dev" in normalized
 
 
 def format_timestamp(value: str | None) -> str:
@@ -92,8 +125,11 @@ def format_timestamp(value: str | None) -> str:
 
 
 def friendly_version_label(version_id: str | None) -> str:
-    prefix = str(get_identity_config().get("banner_prefix") or DEFAULTS["banner_prefix"])
-    return f"{prefix} {normalize_release_tag(version_id)}"
+    config = get_identity_config()
+    tag = normalize_release_tag(version_id)
+    prefix_key = "development_prefix" if _is_development_release(tag) else "main_release_prefix"
+    prefix = str(config.get(prefix_key) or DEFAULTS[prefix_key])
+    return f"{prefix} {tag}"
 
 
 def format_display_version(

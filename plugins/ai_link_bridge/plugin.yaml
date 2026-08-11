@@ -1,0 +1,9 @@
+name: ai_link_bridge
+title: AI-Link Bridge
+description: Portable AI-Link client bridge plugin for AgentSpine/A0. Provides health, capabilities, session metrics, and task-trigger scaffolding for the AI-Link Unity client and future AINexus seeding.
+version: 0.1.0
+settings_sections:
+  - agent
+per_project_config: true
+per_agent_config: true
+always_enabled: false
