@@ -1,0 +1,53 @@
+<html>
+<head>
+  <title>Multi Source Updater</title>
+  <script type="module">
+    import { callJsonApi } from "/js/api.js";
+
+    window.agentspineSaveUpdateSource = async (config, value) => {
+      const status = document.querySelector(".agentspine-update-source-config-status");
+      if (status) status.textContent = "Saving update source…";
+      try {
+        const result = await callJsonApi("/plugins/_multi_source_updater/source", {
+          update_source: value,
+        });
+        if (!result?.success) throw new Error(result?.error || "Unable to save update source.");
+        config.update_source = result.active_update_source;
+        if (status) status.textContent = result.source_execution?.note || "Update source saved.";
+      } catch (error) {
+        if (status) status.textContent = error?.message || "Unable to save update source.";
+      }
+    };
+  </script>
+</head>
+<body>
+  <div x-data>
+    <template x-if="config">
+      <div class="plugin-config-page">
+        <div class="section-title">Update source</div>
+        <div class="section-description">
+          Select the repository used by Agent Spine’s source-aware update discovery.
+        </div>
+        <div class="field">
+          <div class="field-label">
+            <div class="field-title">Repository</div>
+            <div class="field-description">
+              The selection is saved immediately and is also shown in Advanced Self Update.
+            </div>
+          </div>
+          <div class="field-control">
+            <select
+              x-model="config.update_source"
+              @change="window.agentspineSaveUpdateSource(config, $event.target.value)"
+            >
+              <option value="omni-nexusai">Agent Spine (Omni-NexusAI)</option>
+              <option value="agent0ai">Agent Zero upstream (agent0ai)</option>
+            </select>
+          </div>
+        </div>
+        <div class="section-description agentspine-update-source-config-status"></div>
+      </div>
+    </template>
+  </div>
+</body>
+</html>

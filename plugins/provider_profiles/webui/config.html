@@ -1,0 +1,16 @@
+<div>
+  <p class="hint">Provider history is stored locally in the browser. Existing history is not altered when these settings change.</p>
+  <label>History storage key
+    <input type="text" x-model="config.history_storage_key">
+  </label>
+  <label>LM Studio API base
+    <input type="url" x-model="config.local_provider_defaults.lm_studio">
+  </label>
+  <label>Ollama API base
+    <input type="url" x-model="config.local_provider_defaults.ollama">
+  </label>
+  <label class="checkbox-label">
+    <input type="checkbox" x-model="config.clear_stale_model_on_new_provider">
+    Clear a stale model when a provider has no saved profile
+  </label>
+</div>

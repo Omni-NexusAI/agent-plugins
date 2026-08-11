@@ -2,13 +2,15 @@ import json
 
 from agent import LoopData
 from helpers.extension import Extension
-from plugins._agentspine_identity.helpers.identity import apply_identity_text
+from plugins._agentspine_identity.helpers.identity import apply_identity_text, is_identity_enabled
 
 
 class InitialMessage(Extension):
     def execute(self, **kwargs):
         """Add the Agentspine-branded greeting for the main agent."""
 
+        if not is_identity_enabled():
+            return
         if self.agent.number != 0:
             return
         if self.agent.context.log.logs:
@@ -32,4 +34,3 @@ class InitialMessage(Extension):
             finished=True,
             update_progress="none",
         )
-

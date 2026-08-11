@@ -1,7 +1,7 @@
 name: _enhanced_speech
 title: Enhanced Speech
 description: Enables Agentspine enhanced Kokoro speech capabilities in the plugin framework.
-version: 0.9.9
-always_enabled: true
+version: 1.0.0
+always_enabled: false
 settings_sections:
   - agent

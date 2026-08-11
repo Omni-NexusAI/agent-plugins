@@ -1,0 +1,91 @@
+<script>
+  (() => {
+    const pluginPath = "/plugins/_multi_source_updater/source";
+
+    async function callSource(payload = {}) {
+      const api = await import("/js/api.js");
+      return api.callJsonApi(pluginPath, payload);
+    }
+
+    function patchStore() {
+      const store = globalThis.Alpine?.store?.("selfUpdateStore");
+      if (!store || store.__agentspineMultiSourceUpdaterPatched) return false;
+      store.__agentspineMultiSourceUpdaterPatched = true;
+      store.form = store.form || {};
+      store.form.update_source = store.info?.active_update_source || store.form.update_source || "omni-nexusai";
+
+      const originalApplyFormState = store.applyFormState?.bind(store);
+      store.applyFormState = function(source) {
+        originalApplyFormState?.(source);
+        this.form.update_source = this.info?.active_update_source || source?.update_source || this.form.update_source || "omni-nexusai";
+      };
+
+      const originalSchedule = store.scheduleUpdateRequest?.bind(store);
+      store.scheduleUpdateRequest = async function(payload, message) {
+        return originalSchedule?.({
+          ...(payload || {}),
+          update_source: this.form.update_source || this.info?.active_update_source || "omni-nexusai",
+        }, message);
+      };
+
+      store.onUpdateSourceChanged = async function() {
+        this.error = "";
+        try {
+          const response = await callSource({ update_source: this.form.update_source });
+          if (!response?.success) throw new Error(response?.error || "Unable to save update source.");
+          this.form.update_source = response.active_update_source || this.form.update_source;
+          await this.refresh();
+          this.form.branch = this.info?.defaults?.branch || "main";
+          this.form.tag = this.info?.defaults?.tag || "";
+          await this.fetchTags();
+          injectControl();
+        } catch (error) {
+          this.error = error?.message || "Unable to save update source.";
+        }
+      };
+      return true;
+    }
+
+    function injectControl() {
+      patchStore();
+      const store = globalThis.Alpine?.store?.("selfUpdateStore");
+      if (!store?.info?.update_sources?.length) return;
+      const advanced = document.querySelector("#self-update-advanced");
+      if (!advanced || advanced.querySelector(".agentspine-update-source-field")) return;
+      const branchField = Array.from(advanced.querySelectorAll(".field"))
+        .find((field) => field.querySelector(".field-title")?.textContent?.trim() === "Target branch");
+      if (!branchField) return;
+
+      const wrapper = document.createElement("div");
+      wrapper.className = "field agentspine-update-source-field";
+      wrapper.innerHTML = `
+        <div class="field-label">
+          <div class="field-title">Update source</div>
+          <div class="field-description">Choose the repository used to resolve branches and release tags.</div>
+        </div>
+        <div class="field-control"><select aria-label="Update source"></select></div>
+        <div class="field-description agentspine-update-source-note"></div>
+      `;
+      const select = wrapper.querySelector("select");
+      for (const source of store.info.update_sources) {
+        const option = document.createElement("option");
+        option.value = source.value;
+        option.textContent = source.label;
+        select.append(option);
+      }
+      select.value = store.form.update_source || store.info.active_update_source || "omni-nexusai";
+      const note = wrapper.querySelector(".agentspine-update-source-note");
+      if (note) note.textContent = store.info.source_execution?.note || "";
+      select.addEventListener("change", () => {
+        store.form.update_source = select.value;
+        void store.onUpdateSourceChanged?.();
+      });
+      branchField.parentElement?.insertBefore(wrapper, branchField);
+    }
+
+    document.addEventListener("alpine:init", () => setTimeout(injectControl, 0));
+    document.addEventListener("DOMContentLoaded", injectControl, { once: true });
+    new MutationObserver(injectControl).observe(document.documentElement, { childList: true, subtree: true });
+    injectControl();
+  })();
+</script>

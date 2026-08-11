@@ -1,0 +1,23 @@
+server:
+  protocol_version: "ailink.v1"
+  bridge_host: "0.0.0.0"
+  bridge_port: 8765
+  enable_ws_bridge: true
+  enable_http_bridge: true
+stream:
+  max_sessions: 2
+  max_fps: 30
+  expected_video_formats:
+    - jpeg
+    - h264
+  expected_audio_formats:
+    - opus
+  require_auth_token: false
+  auth_token: ""
+telemetry:
+  keep_last_frames: 8
+  expose_metrics: true
+  log_protocol_events: true
+tasks:
+  allow_agent_task_trigger: true
+  default_route: "agentspine"

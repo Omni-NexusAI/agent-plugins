@@ -6,7 +6,7 @@ import urllib.request
 from urllib.parse import urlparse
 
 
-DEFAULT_WORKER_URL = "http://kokoro-gpu-worker:8891"
+DEFAULT_WORKER_URL = "http://kokoro-worker:8891"
 REMOTE_DEVICE_VALUE = "remote"
 
 
@@ -128,12 +128,19 @@ def apply_remote_tts_runtime_settings(settings: dict | None) -> dict | None:
     return settings
 
 
-def patch_runtime() -> None:
-    import helpers.build_type as build_type
-    import helpers.settings as settings_module
+def patch_runtime() -> bool:
+    """Install optional remote-worker defaults when this host exposes them.
+
+    Speech must remain a no-op on hosts without the older settings helpers.
+    """
+    try:
+        import helpers.build_type as build_type
+        import helpers.settings as settings_module
+    except Exception:
+        return False
 
     if getattr(settings_module, "_agentspine_enhanced_speech_patched", False):
-        return
+        return True
 
     original_options = settings_module.get_tts_device_options
     original_defaults = settings_module.get_tts_defaults
@@ -160,3 +167,4 @@ def patch_runtime() -> None:
     current = getattr(settings_module, "_settings", None)
     if isinstance(current, dict):
         apply_remote_tts_runtime_settings(current)
+    return True

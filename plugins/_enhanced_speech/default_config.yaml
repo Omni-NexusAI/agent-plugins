@@ -1,0 +1,23 @@
+tts:
+  provider: kokoro
+  kokoro:
+    primary_voice: am_michael
+    secondary_voice: ''
+    voice_blend: 50
+    speed: 1.1
+    device: auto
+    remote:
+      enabled: false
+      url: http://kokoro-gpu-worker:8891
+      token: ''
+      timeout: 20
+stt:
+  provider: whisper
+  whisper:
+    model_size: base
+    device: auto
+    language: en
+    message_mode: send
+    silence_threshold: 0.3
+    silence_duration: 1000
+    waiting_timeout: 2000

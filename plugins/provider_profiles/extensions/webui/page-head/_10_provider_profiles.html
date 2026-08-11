@@ -1,90 +1,274 @@
 <script>
   (() => {
-    const historyKey = "modelConfig_providerHistory";
+    const pluginName = "_provider_profiles";
     const localDefaults = {
       lm_studio: "http://host.docker.internal:1234/v1",
       ollama: "http://host.docker.internal:11434",
     };
     const localUrls = Object.values(localDefaults);
+    const modelSections = ["chat_model", "utility_model", "embedding_model"];
+    let backendProfilesPromise = null;
+    let backendProfiles = { profiles: {} };
+    let wireScheduled = false;
 
-    function storageRead() {
-      try { return JSON.parse(localStorage.getItem(historyKey) || "{}"); } catch { return {}; }
+    async function fetchApi() {
+      const api = await import("/js/api.js");
+      return api.fetchApi;
     }
 
-    function storageWrite(value) {
-      try { localStorage.setItem(historyKey, JSON.stringify(value || {})); } catch {}
+    function clone(value) {
+      return JSON.parse(JSON.stringify(value || {}));
     }
 
-    function patchStore() {
+    function providerId(value) {
+      return (value || "").toString().trim().toLowerCase();
+    }
+
+    function slotKey(sectionKey, provider) {
+      return `${sectionKey}:${providerId(provider)}`;
+    }
+
+    function shouldUseLocalDefault(model) {
+      const provider = providerId(model?.provider);
+      if (!(provider in localDefaults)) return false;
+      const current = (model?.api_base || "").trim();
+      return !current || localUrls.includes(current);
+    }
+
+    function applyLocalDefault(model) {
+      const provider = providerId(model?.provider);
+      if (provider in localDefaults && shouldUseLocalDefault(model)) {
+        model.api_base = localDefaults[provider];
+      }
+    }
+
+    function normalizeModel(model = {}) {
+      const clean = clone(model);
+      for (const key of Object.keys(clean)) {
+        if (key.startsWith("_")) delete clean[key];
+      }
+      return {
+        provider: clean.provider || "",
+        name: clean.name || "",
+        api_base: clean.api_base || "",
+        ctx_length: clean.ctx_length,
+        ctx_history: clean.ctx_history,
+        ctx_input: clean.ctx_input,
+        vision: Boolean(clean.vision),
+        max_embeds: clean.max_embeds,
+        rl_requests: clean.rl_requests,
+        rl_input: clean.rl_input,
+        rl_output: clean.rl_output,
+        kwargs: clean.kwargs && typeof clean.kwargs === "object" ? clean.kwargs : {},
+      };
+    }
+
+    async function loadProfiles() {
+      if (backendProfilesPromise) return backendProfilesPromise;
+      backendProfilesPromise = (async () => {
+        try {
+          const request = await fetchApi();
+          const response = await request("/plugins", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "get_config", plugin_name: pluginName }),
+          });
+          const result = await response.json().catch(() => ({}));
+          backendProfiles = result.ok && result.data && typeof result.data === "object"
+            ? { profiles: result.data.profiles || {} }
+            : { profiles: {} };
+        } catch {
+          backendProfiles = { profiles: {} };
+        }
+        return backendProfiles;
+      })();
+      return backendProfilesPromise;
+    }
+
+    async function saveProfiles() {
+      try {
+        const request = await fetchApi();
+        await request("/plugins", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "save_config",
+            plugin_name: pluginName,
+            settings: backendProfiles,
+          }),
+        });
+      } catch (error) {
+        console.warn("Provider Profiles: failed to save profiles", error);
+      }
+    }
+
+    function captureModel(sectionKey, model, providerOverride = "") {
+      const provider = providerId(providerOverride || model?.provider);
+      if (!provider) return;
+      backendProfiles.profiles = backendProfiles.profiles || {};
+      backendProfiles.profiles[slotKey(sectionKey, provider)] = normalizeModel({
+        ...model,
+        provider,
+      });
+    }
+
+    function restoreModel(sectionKey, model, provider) {
+      const normalizedProvider = providerId(provider);
+      if (!model || !normalizedProvider) return;
+      const saved = backendProfiles.profiles?.[slotKey(sectionKey, normalizedProvider)];
+      model.provider = normalizedProvider;
+      if (saved) {
+        Object.assign(model, clone(saved), { provider: normalizedProvider });
+      } else {
+        model.name = "";
+        if (normalizedProvider in localDefaults) {
+          model.api_base = localDefaults[normalizedProvider];
+        } else if (localUrls.includes(model.api_base || "")) {
+          model.api_base = "";
+        }
+      }
+      applyLocalDefault(model);
+    }
+
+    function captureAll(config) {
+      for (const sectionKey of modelSections) {
+        const model = config?.[sectionKey];
+        if (model?.provider) captureModel(sectionKey, model);
+      }
+    }
+
+    async function installContextHooks(context) {
+      if (!context || context.__providerProfilesHooksInstalled || context.pluginName !== "_model_config") return;
+      context.__providerProfilesHooksInstalled = true;
+      await loadProfiles();
+      captureAll(context.settings);
+      for (const sectionKey of modelSections) {
+        applyLocalDefault(context.settings?.[sectionKey]);
+      }
+
+      const originalLoadSettings = context.loadSettings?.bind(context);
+      if (originalLoadSettings) {
+        context.loadSettings = async (...args) => {
+          const result = await originalLoadSettings(...args);
+          await loadProfiles();
+          for (const sectionKey of modelSections) applyLocalDefault(context.settings?.[sectionKey]);
+          captureAll(context.settings);
+          return result;
+        };
+      }
+
+      const originalSave = context.save?.bind(context);
+      if (originalSave) {
+        context.save = async () => {
+          captureAll(context.settings);
+          await saveProfiles();
+          return await originalSave();
+        };
+      }
+    }
+
+    function patchModelConfigStore() {
       const store = globalThis.Alpine?.store?.("modelConfig");
       if (!store || store.__providerProfilesPatched) return;
       store.__providerProfilesPatched = true;
-      store._providerModelHistory = store._providerModelHistory || storageRead();
-      store._HISTORY_LS_KEY = store._HISTORY_LS_KEY || historyKey;
-      store.onProviderChanged = function(sectionKey, model, oldProvider) {
-        if (!model) return;
-        const newProvider = model.provider;
-        if (!newProvider || newProvider === oldProvider) return;
-        if (oldProvider && model.name?.trim()) {
-          this._providerModelHistory[`${sectionKey}_${oldProvider}`] = {
-            name: model.name,
-            api_base: model.api_base || "",
-            ctx_length: model.ctx_length,
-          };
-          storageWrite(this._providerModelHistory);
+      store.providerProfilesLocalDefaults = localDefaults;
+      store.providerProfilesCaptureAll = captureAll;
+
+      const originalInstallSettingsHooks = store.installSettingsHooks?.bind(store);
+      if (originalInstallSettingsHooks) {
+        store.installSettingsHooks = function(context) {
+          const result = originalInstallSettingsHooks(context);
+          installContextHooks(context);
+          return result;
+        };
+      }
+
+      const originalSearchModelsDetailed = store.searchModelsDetailed?.bind(store);
+      if (originalSearchModelsDetailed) {
+        store.searchModelsDetailed = async function(provider, query, modelType, apiBase) {
+          const normalized = providerId(provider);
+          let resolvedApiBase = apiBase || "";
+          if (!resolvedApiBase && normalized in localDefaults) {
+            resolvedApiBase = localDefaults[normalized];
+          }
+          return await originalSearchModelsDetailed(provider, query, modelType, resolvedApiBase);
+        };
+      }
+
+      store.onProviderProfileChanged = async function(sectionKey, model, previousProvider, previousSnapshot) {
+        await loadProfiles();
+        if (previousProvider) {
+          captureModel(sectionKey, previousSnapshot || model, previousProvider);
         }
-        if (newProvider in localDefaults) {
-          if (!model.api_base?.trim() || localUrls.includes(model.api_base)) model.api_base = localDefaults[newProvider];
-        } else if (localUrls.includes(model.api_base)) {
-          model.api_base = "";
-        }
-        const saved = this._providerModelHistory[`${sectionKey}_${newProvider}`];
-        if (saved?.name) {
-          model.name = saved.name;
-          if (saved.api_base !== undefined) model.api_base = saved.api_base || "";
-          if (saved.ctx_length !== undefined) model.ctx_length = saved.ctx_length;
-        } else {
-          model.name = "";
-        }
+        restoreModel(sectionKey, model, model.provider);
+        await saveProfiles();
       };
     }
 
     function findModelScope(element) {
-      const stack = element?._x_dataStack || [];
-      return stack.find((scope) => scope && scope.model && scope.modelType) || null;
+      const data = globalThis.Alpine?.$data?.(element);
+      return data?.model && data?.modelType ? data : null;
+    }
+
+    function sectionKeyFromScope(scope) {
+      return `${scope?.modelType || "chat"}_model`;
     }
 
     function wireProviderSelects(root = document) {
-      patchStore();
+      patchModelConfigStore();
       const store = globalThis.Alpine?.store?.("modelConfig");
-      if (!store?.onProviderChanged) return;
-      const selects = root.querySelectorAll?.('select[x-model="model.provider"]') || [];
+      if (!store?.onProviderProfileChanged) return;
+      const selects = [];
+      if (root.matches?.('select[x-model="model.provider"]')) selects.push(root);
+      selects.push(...(root.querySelectorAll?.('select[x-model="model.provider"]') || []));
       selects.forEach((select) => {
-        if (select.__providerHistoryWired) return;
-        select.__providerHistoryWired = true;
+        if (select.__providerProfilesWired) return;
+        select.__providerProfilesWired = true;
         select.dataset.prevProvider = select.value || "";
-        select.addEventListener("focus", () => { select.dataset.prevProvider = select.value || ""; });
-        select.addEventListener("change", () => {
+        const capturePrevious = () => {
+          const scope = findModelScope(select);
+          select.dataset.prevProvider = scope?.model?.provider || select.value || "";
+          select.__providerProfilesSnapshot = normalizeModel(scope?.model || {});
+        };
+        select.addEventListener("focus", capturePrevious);
+        select.addEventListener("pointerdown", capturePrevious);
+        select.addEventListener("keydown", capturePrevious);
+        select.addEventListener("change", async () => {
           const scope = findModelScope(select);
           if (!scope?.model) return;
-          const oldProvider = select.dataset.prevProvider || scope._prevProvider || "";
-          const sectionKey = `${scope.modelType || "chat"}_model`;
-          store.onProviderChanged(sectionKey, scope.model, oldProvider);
+          const previousProvider = select.dataset.prevProvider || "";
+          const previousSnapshot = select.__providerProfilesSnapshot || normalizeModel(scope.model);
+          const sectionKey = sectionKeyFromScope(scope);
+          await store.onProviderProfileChanged(sectionKey, scope.model, previousProvider, previousSnapshot);
           select.dataset.prevProvider = scope.model.provider || select.value || "";
-          if ("_prevProvider" in scope) scope._prevProvider = scope.model.provider;
+          select.__providerProfilesSnapshot = normalizeModel(scope.model);
         });
       });
     }
 
-    document.addEventListener("alpine:init", () => setTimeout(() => wireProviderSelects(), 0));
-    document.addEventListener("DOMContentLoaded", () => wireProviderSelects(), { once: true });
+    function scheduleWire(root = document) {
+      if (root && root.nodeType === 1) {
+        const relevant = root.matches?.('select[x-model="model.provider"], .plugin-config-page, .modal')
+          || root.querySelector?.('select[x-model="model.provider"], .plugin-config-page, .modal');
+        if (!relevant) return;
+      }
+      if (wireScheduled) return;
+      wireScheduled = true;
+      window.requestAnimationFrame(() => {
+        wireScheduled = false;
+        wireProviderSelects(root && root.nodeType === 1 ? root : document);
+      });
+    }
+
+    document.addEventListener("alpine:init", () => setTimeout(scheduleWire, 0));
+    document.addEventListener("DOMContentLoaded", scheduleWire, { once: true });
+    scheduleWire();
     new MutationObserver((mutations) => {
-      patchStore();
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
-          if (node.nodeType === 1) wireProviderSelects(node);
+          scheduleWire(node);
         }
       }
-    }).observe(document.documentElement, { childList: true, subtree: true });
+    }).observe(document.body || document.documentElement, { childList: true, subtree: true });
   })();
 </script>
