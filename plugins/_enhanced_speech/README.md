@@ -2,6 +2,29 @@
 
 Agentspine built-in speech overlay for Agent Zero-compatible runtimes.
 
+## Agent Zero 2.11 compatibility
+
+Native voice selection, per-voice sliders, percentages and mixing remain in
+control. Enhanced Speech adds all 28 supported voices, including eight British
+voices, to the native catalog and selection groups without removing native or
+custom entries. Its duplicate secondary-voice and blend controls appear only
+on older hosts without the native editor.
+
+`voice` and `voice_weights` survive save/reopen, status and synthesis. An empty
+weight map means equal weights. Legacy two-voice settings migrate only when
+native weights are absent. Configuration writes preserve unrelated keys and
+replace complete files atomically.
+
+Local synthesis uses the native mixer with the selected processing device.
+Remote mode maps one or two voices to the existing worker protocol and retains
+endpoint, authentication, timeout and speed. More than two remote voices cause
+a clear error before a synthesis request; use local mode for larger blends.
+The existing remote worker also accepts only whole-number percentages from
+1 to 99. Ratios such as 3:7 work exactly; 2:7 and other nonrepresentable ratios
+raise an explicit error instead of silently rounding. Local mode retains
+arbitrary native weights.
+Recording, Whisper/STT behavior, device controls and thumbnails are retained.
+
 ## Purpose
 
 `_enhanced_speech` keeps Agentspine speech behavior in a plugin package instead
@@ -13,8 +36,8 @@ runtime behaviors:
   recorder that uses the host's current Whisper transcription route.
 
 The plugin is packaged as an underscore built-in overlay and is expected to load
-from `/a0/plugins/_enhanced_speech` in baked Agentspine images. It is not yet a
-marketplace/custom-plugin distribution.
+from `/a0/plugins/_enhanced_speech` in baked Agentspine images or as a user
+override at `/a0/usr/plugins/_enhanced_speech`, retaining the same directory name.
 
 ## Runtime Design
 
