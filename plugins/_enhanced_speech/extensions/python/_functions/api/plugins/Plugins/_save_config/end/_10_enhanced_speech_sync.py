@@ -58,17 +58,9 @@ class EnhancedSpeechSaveSync(Extension):
         if isinstance(before, dict) and isinstance(after, dict):
             voice_changed = any(
                 before.get(key) != after.get(key)
-                for key in ("voice", "primary_voice", "secondary_voice", "voice_blend")
+                for key in ("voice", "voice_weights")
             )
             if voice_changed:
-                secondary = str(after.get("secondary_voice") or "").strip()
-                if secondary:
-                    ratio = int(after.get("voice_blend") or 50)
-                    _notify(
-                        f"Kokoro voice changed to {after.get('voice')} ({ratio}%) + {secondary} ({100 - ratio}%).",
-                        "kokoro-voice",
-                    )
-                else:
-                    _notify(f"Kokoro voice changed to {after.get('voice')}.", "kokoro-voice")
+                _notify(f"Kokoro voice changed to {helper.voice_summary(after)}.", "kokoro-voice")
             if before.get("speed") != after.get("speed"):
                 _notify(f"Kokoro voice speed changed to {after.get('speed')}.", "kokoro-speed")

@@ -61,8 +61,18 @@ updates as a built-in plugin overlay.
   just-saved Enhanced Speech contract as authoritative. Normal runtime reads
   may give the provider file precedence, but must never write stale primary
   voice or speed values back over that save.
-- Treat `voice`, `primary_voice`, `secondary_voice`, and `voice_blend` as one
-  normalized contract so the displayed voice summary matches synthesis.
+- Native `voice` and `voice_weights` own synthesis and summaries. An explicit
+  empty weight map means equal weights, not legacy migration. Replace weight
+  maps atomically when merging; never resurrect removed voices. Migrate legacy
+  pairs only when native weighted settings are absent and retain unknown keys.
+- Extend the native voice catalog and optgroups additively with all plugin
+  voices. Keep native sliders/percentages and suppress only the old pair/blend
+  controls on hosts exposing `.kokoro-blend-editor`.
+- Local synthesis uses native `_resolve_voice` when available. Preserve device
+  selection. Remote synthesis translates one/two voices to voice/voice2/blend;
+  reject more than two voices explicitly without sending a truncated blend.
+  The existing worker truncates/clamps blend to integer 1..99; reject ratios
+  it cannot represent exactly. Never silently round native weights.
 - Prefer Kokoro's public `load_voice` and documented
   `(graphemes, phonemes, audio)` synthesis tuple; retain a guarded
   `load_single_voice` fallback only for older compatible host runtimes.
@@ -135,6 +145,9 @@ updates as a built-in plugin overlay.
 ## Verification
 
 - Parse touched Python files.
+- Run `python -m pytest tests` with host config helpers isolated and temporary
+  config paths; native empty-weight, migration, atomic writes and remote
+  protocol tests must not mutate installed settings.
 - Confirm remote TTS settings are filled only when a configured or reachable
   endpoint exists.
 - Confirm the frontend recorder initializes once and can submit transcribed text.

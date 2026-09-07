@@ -40,10 +40,10 @@ class Voices(ApiHandler):
         return ["GET", "POST"]
 
     async def process(self, input: dict, request: Request) -> dict | Response:
-        values = [
-            str(input.get(key, "") or "").strip()
-            for key in ("voice", "primary_voice", "secondary_voice")
-        ]
+        values = [value.strip() for key in ("voice", "primary_voice", "secondary_voice")
+                  for value in str(input.get(key, "") or "").split(",") if value.strip()]
+        if isinstance(input.get("voice_weights"), dict):
+            values.extend(str(value).strip() for value in input["voice_weights"])
         seen = {item["value"] for item in VOICE_OPTIONS}
         options = list(VOICE_OPTIONS)
         for value in values:

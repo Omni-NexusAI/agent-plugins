@@ -61,7 +61,7 @@ def _notify_saved_config(config: dict) -> None:
 
         primary = str(config.get("voice") or config.get("primary_voice") or "").strip()
         secondary = str(config.get("secondary_voice") or "").strip()
-        voice = f"{primary} + {secondary}" if secondary else primary
+        voice = _config_helper().voice_summary(config)
         mode = str(config.get("effective_device_label") or config.get("device") or "Auto")
         NotificationManager.send_notification(
             NotificationType.SUCCESS,
@@ -152,13 +152,17 @@ def _runtime_config(helper) -> dict:
 
 
 def _save_runtime_config(helper, requested: dict) -> dict:
-    normalized = helper.normalize_kokoro_config({**_runtime_config(helper), **requested})
+    merged = {**_runtime_config(helper), **requested}
+    if "voice_weights" not in requested and any(key in requested for key in ("voice", "secondary_voice", "voice_blend")):
+        merged.pop("voice_weights", None)
+    normalized = helper.normalize_kokoro_config(merged)
 
     provider_path = _plugin_config_path("_kokoro_tts")
     provider = _read_config(provider_path)
     provider.update(
         {
             "voice": normalized["voice"],
+            "voice_weights": normalized["voice_weights"],
             "primary_voice": normalized["primary_voice"],
             "secondary_voice": normalized["secondary_voice"],
             "voice_blend": normalized["voice_blend"],
@@ -201,7 +205,7 @@ class SpeechConfig(ApiHandler):
         requested = {
             key: input[key]
             for key in (
-                "voice", "primary_voice", "secondary_voice", "voice_blend",
+                "voice", "voice_weights", "primary_voice", "secondary_voice", "voice_blend",
                 "speed", "device", "remote_enabled", "remote_url",
                 "remote_token", "remote_timeout",
             )

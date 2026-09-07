@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import os
 import re
 import tempfile
@@ -27,6 +28,7 @@ DEVICE_ALIASES = {
     "remote_worker": "remote",
 }
 CUDA_DEVICE_RE = re.compile(r"^cuda:\d+$")
+VOICE_ID_RE = re.compile(r"^[a-z]{2}_[a-z0-9_]+$")
 
 DEFAULTS: dict[str, Any] = {
     "tts": {
@@ -83,7 +85,7 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any] | None) -> dict[st
     if not isinstance(overlay, dict):
         return result
     for key, value in overlay.items():
-        if isinstance(value, dict) and isinstance(result.get(key), dict):
+        if key != "voice_weights" and isinstance(value, dict) and isinstance(result.get(key), dict):
             result[key] = _deep_merge(result[key], value)
         else:
             result[key] = value
@@ -174,7 +176,7 @@ def normalize_kokoro_config(raw: dict[str, Any] | None = None) -> dict[str, Any]
     # panel only sends ``voice``; do not let the default alias hide it.
     if "voice" in source:
         cfg["primary_voice"] = source.get("voice")
-    if "tts_kokoro_voice" in cfg:
+    if "tts_kokoro_voice" in cfg and "voice" not in source and "voice_weights" not in source:
         cfg["primary_voice"] = cfg.get("tts_kokoro_voice")
     if "tts_kokoro_voice_secondary" in cfg:
         cfg["secondary_voice"] = cfg.get("tts_kokoro_voice_secondary")
@@ -208,7 +210,8 @@ def normalize_kokoro_config(raw: dict[str, Any] | None = None) -> dict[str, Any]
         device = "auto"
     remote_url = str(remote.get("url") or DEFAULT_REMOTE_URL).strip().rstrip("/")
 
-    return {
+    result = {
+        **source,
         "voice": primary,
         "primary_voice": primary,
         "secondary_voice": secondary,
@@ -223,6 +226,40 @@ def normalize_kokoro_config(raw: dict[str, Any] | None = None) -> dict[str, Any]
         "remote_timeout": _as_float(remote.get("timeout"), 20.0, 1.0),
         "remote_url_candidates": list(REMOTE_URL_CANDIDATES),
     }
+    # Presence, including {}, is authoritative: equal weights must not revive
+    # the old pair on a subsequent read/save. Migrate a legacy pair once only.
+    weights = {}
+    if "voice_weights" in source:
+        for voice_id, raw_weight in (source.get("voice_weights") or {}).items() if isinstance(source.get("voice_weights"), dict) else ():
+            voice_id = str(voice_id).strip()
+            try:
+                weight = float(raw_weight)
+            except (TypeError, ValueError):
+                continue
+            if VOICE_ID_RE.fullmatch(voice_id) and math.isfinite(weight) and weight > 0:
+                weights[voice_id] = weight
+    elif secondary and "," not in primary:
+        ratio = result["voice_blend"] / 10.0
+        if VOICE_ID_RE.fullmatch(primary) and VOICE_ID_RE.fullmatch(secondary):
+            weights[primary] = ratio
+            weights[secondary] = weights.get(secondary, 0) + 10.0 - ratio
+    result["voice_weights"] = weights
+    result["voice"] = ",".join(weights) if weights else primary
+    result["primary_voice"] = result["voice"].split(",")[0]
+    ids = [value.strip() for value in result["voice"].split(",") if value.strip()]
+    result["secondary_voice"] = ids[1] if len(ids) == 2 else ""
+    result["voice_blend"] = 100 * weights[ids[0]] / sum(weights.values()) if len(ids) == 2 and weights else 50
+    # Legacy aliases remain display compatibility only. Native fields alone
+    # determine synthesis, including native equal-weight expressions.
+    return result
+
+
+def voice_summary(cfg: dict[str, Any]) -> str:
+    weights = cfg.get("voice_weights") or {}
+    total = sum(weights.values())
+    if total > 0:
+        return " + ".join(f"{voice} ({weight / total:.0%})" for voice, weight in weights.items())
+    return str(cfg.get("voice") or "")
 
 
 def normalize_whisper_config(raw: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -279,6 +316,7 @@ def provider_kokoro_config(settings: dict[str, Any]) -> dict[str, Any]:
     cfg = normalize_kokoro_config(settings)
     result = dict(settings or {})
     result["voice"] = cfg["voice"]
+    result["voice_weights"] = cfg["voice_weights"]
     result["speed"] = cfg["speed"]
     result["secondary_voice"] = cfg["secondary_voice"]
     result["voice_blend"] = cfg["voice_blend"]
@@ -301,7 +339,12 @@ def provider_whisper_config(settings: dict[str, Any]) -> dict[str, Any]:
 def sync_enhanced_from_provider(plugin_name: str, settings: dict[str, Any]) -> None:
     current = _deep_merge(DEFAULTS, _plugin_config(PLUGIN_NAME))
     if plugin_name == KOKORO_PLUGIN:
-        current["tts"]["kokoro"] = normalize_kokoro_config(settings)
+        merged = _deep_merge(current["tts"]["kokoro"], settings)
+        if "voice_weights" not in settings and any(key in settings for key in ("voice", "primary_voice", "secondary_voice", "voice_blend")):
+            # Older provider modals send a newly edited legacy pair. Previously
+            # migrated weights from the plugin mirror must not override it.
+            merged.pop("voice_weights", None)
+        current["tts"]["kokoro"] = normalize_kokoro_config(merged)
     elif plugin_name == WHISPER_PLUGIN:
         current["stt"]["whisper"] = normalize_whisper_config(settings)
     elif plugin_name in {PLUGIN_NAME, LEGACY_PLUGIN_NAME}:
