@@ -11,6 +11,21 @@
 The current packages are plugin-local implementations. They are intended to
 survive compatible Agent Zero updates without modifying host-core files.
 
+## Browser Session Sync Compatibility Source
+
+`plugins/browser_session_sync` is synchronized to the standalone
+`Omni-NexusAI/browser_session_sync` compatibility source at commit
+`45ecd50c1475cd650f4154a730d416b36ee9b05c`, packaged as version 1.4.2 with
+deferred follow-ups in `TODO.md`. This includes
+Agent Zero 2.11 native persistence and shared-runtime handling plus the
+synchronous startup/agent initialization fixes. The package files match that
+tested source; `index.yaml` retains this monorepository's repository link.
+
+Validation includes 57 isolated browser/speech regression tests, a successful
+live boot with Browser Session Sync enabled and a healthy API response, and
+the user's subsequent acceptance checks. This deliberately upgrades the
+browser package beyond the historical container snapshots below.
+
 ## A0 and Spine Boundaries
 
 - `_enhanced_speech`, `provider_profiles`, and `ai_link_bridge` are portable

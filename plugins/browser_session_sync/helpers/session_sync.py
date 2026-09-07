@@ -120,15 +120,19 @@ def normalize_config(config: dict[str, Any], *, preserve_unknown: bool = False) 
 
 
 def plugin_enabled() -> bool:
-    return True
+    try:
+        from helpers import plugins
+        return plugins.determined_toggle_from_paths(True, reversed(plugins.get_plugin_roots("browser_session_sync")))
+    except (ImportError, AttributeError):
+        return True
 
 
 def auto_restore_enabled() -> bool:
-    return config_bool("auto_restore", True)
+    return plugin_enabled() and config_bool("auto_restore", True)
 
 
 def auto_save_enabled() -> bool:
-    return config_bool("auto_save", True)
+    return plugin_enabled() and config_bool("auto_save", True)
 
 
 def allow_global_fallback_enabled() -> bool:
@@ -203,6 +207,8 @@ def load_snapshot(path: Path) -> dict[str, Any]:
         "saved_at": raw.get("saved_at") or path.stat().st_mtime,
         "tab_count": int(raw.get("tab_count") or len(tabs)),
         "source": path.name,
+        "context_id": str(raw.get("context_id") or ""),
+        "version": raw.get("version", 1),
     }
 
 
@@ -426,6 +432,12 @@ def update_manifest(context_id: str, path: Path, snapshot: dict[str, Any], signa
     }
     context_id = str(context_id or "default")
     contexts[context_id] = entry
+    if snapshot.get("context_id") == "shared":
+        # Per-chat lookup points into the same global snapshot; no duplicated
+        # sign-in caches and no stale pointer when a chat closes its last tab.
+        owners = set(contexts) | {str(tab.get("context_id") or "") for tab in snapshot.get("tabs") or []}
+        for owner in owners - {"", "shared"}:
+            contexts[owner] = {**contexts.get(owner, {}), **entry}
     manifest["global_latest"] = {"context_id": context_id, **entry}
     save_manifest(manifest)
 
@@ -576,12 +588,15 @@ async def capture_snapshot(core: Any) -> dict[str, Any]:
             title = await page.title()
         except Exception:
             pass
-        tabs.append({"url": url, "title": title, "origin": _origin_for_url(url)})
+        tabs.append({"url": url, "title": title, "origin": _origin_for_url(url),
+                     "context_id": str(getattr(browser_page, "context_id", "") or getattr(core, "context_id", ""))})
     return {
         "context_state": context_state,
         "tabs": tabs,
         "saved_at": time.time(),
         "tab_count": len(tabs),
+        "context_id": str(getattr(core, "context_id", "")),
+        "version": 2,
     }
 
 
@@ -593,7 +608,7 @@ def snapshot_signature(core: Any) -> str:
         url = str(getattr(page, "url", "") or "")
         if not url or url == "about:blank":
             continue
-        urls.append(url)
+        urls.append([str(getattr(browser_page, "context_id", "") or getattr(core, "context_id", "")), url])
     return json.dumps(urls, separators=(",", ":"))
 
 
@@ -719,7 +734,7 @@ async def _inject_storage(core: Any, context_state: dict[str, Any]) -> None:
         "for (const entry of DATA.origins) {"
         " if (entry.origin === origin) {"
         "  for (const item of (entry.localStorage || [])) {"
-        "   try { localStorage.setItem(item.name, item.value); } catch(e) {}"
+        "   try { if (localStorage.getItem(item.name) === null) localStorage.setItem(item.name, item.value); } catch(e) {}"
         "  }"
         "  break;"
         " }"
@@ -735,6 +750,9 @@ async def restore_core_session(
     filename: str | None = None,
     force: bool = False,
 ) -> str:
+    if hasattr(core, "request_context_id") and not force:
+        register_auto_save(core)
+        return "Native Browser persistence owns automatic recovery; cache recovery is startup-only."
     if not force and not auto_restore_enabled():
         return "Browser session auto-restore is disabled."
     register_auto_save(core)
@@ -743,7 +761,7 @@ async def restore_core_session(
     setattr(core, RESTORED_FLAG, True)
 
     selected = select_best_snapshot(
-        str(getattr(core, "context_id", "") or ""),
+        str(getattr(core, "current_context_id", None) or getattr(core, "context_id", "") or ""),
         filename,
         allow_global_fallback=force or None,
     )
@@ -755,12 +773,14 @@ async def restore_core_session(
 
     setattr(core, RESTORING_FLAG, True)
     try:
+        shared = hasattr(core, "request_context_id")
+        current_context = str(getattr(core, "current_context_id", None) or core.context_id)
         existing_urls = {
-            str(browser_page.page.url or "")
+            (str(getattr(browser_page, "context_id", "") or core.context_id), str(browser_page.page.url or ""))
             for browser_page in (getattr(core, "pages", {}) or {}).values()
         }
         state = await core.context.storage_state()
-        if force or not state.get("cookies"):
+        if force or (not state.get("cookies") and not state.get("origins")):
             await _inject_storage(core, context_state)
 
         opened = 0
@@ -770,27 +790,89 @@ async def restore_core_session(
         max_tabs = native_max_tabs
         if not force and restore_limit > 0:
             max_tabs = min(native_max_tabs, restore_limit)
-        for tab in tabs[:max_tabs]:
+        existing_count = sum(1 for owner, _url in existing_urls if owner == current_context)
+        for tab in tabs:
+            if existing_count + opened >= max_tabs:
+                break
             url = str(tab.get("url") or "").strip()
-            if not url or url == "about:blank" or url in existing_urls:
+            owner = snapshot_tab_owner(tab, snapshot, path, current_context) if shared else core.context_id
+            if not owner or (shared and owner != current_context):
+                continue
+            if not url or url == "about:blank" or (owner, url) in existing_urls:
                 continue
             core._ensure_can_open_page()
             page = await core.context.new_page()
-            browser_page = await core._register_page(page)
+            browser_page = await core._register_page(page, owner) if shared else await core._register_page(page)
             _register_page_save_listeners(core, page)
             if first_restored_browser_id is None:
                 first_restored_browser_id = browser_page.id
             await core._goto(page, url)
-            existing_urls.add(url)
+            existing_urls.add((owner, url))
             opened += 1
         if first_restored_browser_id is not None:
             core.last_interacted_browser_id = first_restored_browser_id
+        if shared:
+            core._persist_browser_tabs()
     finally:
         setattr(core, RESTORING_FLAG, False)
 
     if opened or force:
         schedule_save(core, delay=SAVE_CLOSE_DEBOUNCE_SECONDS, reason="close")
-    return f"Restored {opened} tabs from {path.name}."
+    impact = " Shared sign-in cookies/localStorage were applied; only this chat's owned tabs were recovered." if hasattr(core, "request_context_id") else ""
+    return f"Restored {opened} tabs from {path.name}.{impact}"
+
+
+def snapshot_tab_owner(tab: dict, snapshot: dict, path: Path, context_id: str) -> str:
+    owner = str(tab.get("context_id") or snapshot.get("context_id") or "")
+    if owner and owner != "shared":
+        return owner
+    # Old snapshots have no per-tab owner. Only a matching chat filename is
+    # enough evidence; a global cache must never reassign another chat's tabs.
+    if not owner and (path.name == f"{context_id}.json" or path.name.startswith(f"{context_id}_")):
+        return context_id
+    return ""
+
+
+async def prepare_native_fallback(core: Any) -> str:
+    """Runs in native _start, after launch and before scoped tab navigation."""
+    if not auto_restore_enabled():
+        return "Cache auto-recovery is disabled."
+    current = str(core.current_context_id)
+    selected = select_best_snapshot(current)
+    if not selected:
+        return "No cached session."
+    path, snapshot = selected
+    setattr(core, RESTORING_FLAG, True)
+    try:
+        if getattr(core, "_session_sync_empty_profile", False):
+            state = await core.context.storage_state()
+            if not state.get("cookies") and not state.get("origins"):
+                await _inject_storage(core, snapshot.get("context_state") or {})
+        if getattr(core, "_session_sync_native_tabs_absent", False) and not core._restore_state_exists:
+            existing = {(str(getattr(item, "context_id", "") or core.context_id), str(item.page.url))
+                        for item in core.pages.values()}
+            entries = []
+            counts = {}
+            limit = max_auto_restore_tabs() or core._max_open_tabs()
+            for tab in snapshot.get("tabs") or []:
+                owner = snapshot_tab_owner(tab, snapshot, path, current)
+                url = str(tab.get("url") or "").strip()
+                if not owner or not url or url == "about:blank" or (owner, url) in existing:
+                    continue
+                if session_scope() == "chat" and owner != current:
+                    continue
+                if counts.get(owner, 0) >= limit:
+                    continue
+                entries.append({"context_id": owner, "url": url, "active": False})
+                counts[owner] = counts.get(owner, 0) + 1
+                existing.add((owner, url))
+            # Hand entries to native restoration so ownership, scope, tab
+            # limits and later close/persistence behavior remain native.
+            core._restore_entries = entries
+        setattr(core, RESTORED_FLAG, True)
+    finally:
+        setattr(core, RESTORING_FLAG, False)
+    return f"Checked cache fallback {path.name}; native persistence retained."
 
 
 async def auto_restore_core_session(core: Any) -> str:
@@ -826,18 +908,30 @@ async def _run_with_core_started(
     create: bool = False,
     ensure_started: bool = False,
 ) -> str:
+    from usr.plugins.browser_session_sync.helpers.native_adapter import patch_runtime
+    patch_runtime()
     from plugins._browser.helpers.runtime import get_runtime
 
     runtime = await get_runtime(context_id, create=create)
     if not runtime:
         return "No active browser runtime. Open Browser first."
 
+    owner = getattr(runtime, "_runtime", runtime)
+    if getattr(owner, "_closed", False):
+        return "No active browser runtime. Open Browser first."
+    core = owner._core
     async def runner() -> str:
-        if ensure_started:
-            await runtime._core.ensure_started()
-        return await callback(runtime._core)
+        request_context = getattr(core, "request_context_id", None)
+        token = request_context.set(context_id) if request_context is not None else None
+        try:
+            if ensure_started:
+                await core.ensure_started()
+            return await callback(core)
+        finally:
+            if token is not None:
+                request_context.reset(token)
 
-    return await runtime._worker.execute_inside(runner)
+    return await owner._worker.execute_inside(runner)
 
 
 async def save_runtime_snapshot_for_context(context_id: str) -> str:

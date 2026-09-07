@@ -25,19 +25,19 @@ class BrowserSessionRestore(Tool):
                 reverse=True,
             )
             if not files_list:
-                return Response(text="No saved browser sessions found.")
+                return Response(break_loop=False, message="No saved browser sessions found.")
             result = "**Saved browser sessions:**\n\n"
             for path in files_list:
                 result += f"- `{path.name}` ({path.stat().st_size:,} bytes)\n"
-            return Response(text=result)
+            return Response(break_loop=False, message=result)
 
         if filename:
             requested = Path(str(filename))
             if requested.name != filename:
-                return Response(text=f"Invalid session filename: {filename}")
+                return Response(break_loop=False, message=f"Invalid session filename: {filename}")
 
         try:
             message = await restore_runtime_session_for_context(context_id, filename, force=True)
         except Exception as exc:
             message = f"Failed to restore session: {exc}"
-        return Response(text=message)
+        return Response(break_loop=False, message=message)

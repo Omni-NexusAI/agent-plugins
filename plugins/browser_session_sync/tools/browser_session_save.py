@@ -17,4 +17,4 @@ class BrowserSessionSave(Tool):
             message = await save_runtime_snapshot_for_context(context_id)
         except Exception as exc:
             message = f"Save failed: {exc}"
-        return Response(text=message)
+        return Response(break_loop=False, message=message)
