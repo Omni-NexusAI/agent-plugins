@@ -258,7 +258,7 @@
                     <input type="checkbox" x-model="settings.auto_restore" />
                     <span>
                         <strong>Auto-restore when Browser opens</strong>
-                        <small>Runs once per A0 boot for the selected session scope.</small>
+                        <small>On current hosts, recovers only missing native state; existing sign-in and explicitly empty tab state remain authoritative.</small>
                     </span>
                 </label>
                 <label class="toggle-row">
@@ -274,7 +274,7 @@
                         <option value="global">Global across chats</option>
                         <option value="chat">Current chat only</option>
                     </select>
-                    <small>Global is the default and restores the latest browser state from any chat.</small>
+                    <small>Global selects the shared cache while retaining tab ownership. Sign-in remains shared; this does not change native tab scope.</small>
                 </label>
                 <label class="toggle-row">
                     <input type="checkbox" x-model="settings.delete_on_chat_remove" />
