@@ -1,0 +1,138 @@
+<script>
+(() => {
+  const plugin = 'auxiliary_model_roles';
+  const roles = [
+    ['tool', 'Tool', '(Optional) When enabled, a dedicated model handles delegated tool and computer-use steps, returning results or escalations to Main.'],
+    ['coding', 'Coding', '(Optional) When enabled, a dedicated model handles coding work delegated by Main and returns its results.']
+  ];
+  let settings;
+  let loading;
+  let saveTimer;
+
+  async function api(path, body) {
+    const { fetchApi } = await import('/js/api.js');
+    const response = await fetchApi(path, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    if (!response.ok) throw new Error('Request failed');
+    return response.json();
+  }
+
+  function load() {
+    if (!loading) loading = api('/plugins', { action: 'get_config', plugin_name: plugin })
+      .then(result => { settings = result.data || {}; return settings; });
+    return loading;
+  }
+
+  function field(title, description, control) {
+    const row = document.createElement('div'); row.className = 'field';
+    const label = document.createElement('div'); label.className = 'field-label';
+    const heading = document.createElement('div'); heading.className = 'field-title'; heading.textContent = title;
+    const help = document.createElement('div'); help.className = 'field-description'; help.textContent = description;
+    label.append(heading, help);
+    const holder = document.createElement('div'); holder.className = 'field-control'; holder.append(control);
+    row.append(label, holder); return row;
+  }
+
+  function save(status) {
+    clearTimeout(saveTimer); status.textContent = 'Unsaved changes';
+    saveTimer = setTimeout(async () => {
+      try {
+        const result = await api('/plugins', { action: 'save_config', plugin_name: plugin, settings });
+        status.textContent = result.ok ? 'Saved' : 'Unable to save';
+      } catch { status.textContent = 'Unable to save'; }
+    }, 350);
+  }
+
+  function input(value, callback, type = 'text') {
+    const control = document.createElement('input');
+    control.type = type; control.value = value || '';
+    control.addEventListener('change', () => callback(control.value));
+    return control;
+  }
+
+  async function mount(section) {
+    if (section.querySelector(':scope > .auxiliary-roles-inline')) return;
+    const title = (section.querySelector(':scope > .section-title') ||
+      section.querySelector(':scope > .preset-model-heading > .section-title'))?.textContent?.trim();
+    if (title !== 'Main Model') return;
+    const root = document.createElement('div'); root.className = 'auxiliary-roles-inline';
+    root.setAttribute('aria-busy', 'true');
+    const status = document.createElement('div'); status.className = 'field-description';
+    status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+    status.textContent = 'Loading auxiliary roles…'; root.append(status); section.append(root);
+    try {
+      await load(); if (!root.isConnected) return;
+      root.replaceChildren();
+      for (const [key, label, description] of roles) {
+        const entry = settings[key] || (settings[key] = {});
+        const group = document.createElement('div'); group.className = 'aux-role-group';
+        const toggle = document.createElement('input'); toggle.type = 'checkbox';
+        toggle.checked = !!entry.enabled; toggle.setAttribute('aria-label', `${label} specialist`);
+        const switchLabel = document.createElement('label'); switchLabel.className = 'toggle';
+        const indicator = document.createElement('span'); indicator.className = 'toggler';
+        switchLabel.append(toggle, indicator);
+        group.append(field(`${label} model`, description, switchLabel));
+        const details = document.createElement('div'); group.append(details); root.append(group);
+        async function render() {
+          details.replaceChildren(); details.hidden = !toggle.checked;
+          if (!toggle.checked) return;
+          const provider = document.createElement('select');
+          const empty = document.createElement('option'); empty.value = ''; empty.textContent = '— select —'; provider.append(empty);
+          const store = globalThis.Alpine?.store?.('modelConfig');
+          try { await store?.ensureLoaded?.(); } catch {}
+          for (const item of store?.chatProviders || []) {
+            const option = document.createElement('option'); option.value = item.value; option.textContent = item.label; provider.append(option);
+          }
+          provider.value = entry.provider || '';
+          provider.addEventListener('change', () => { entry.provider = provider.value; save(status); });
+          details.append(field('Provider', `LLM provider for the ${label} specialist.`, provider));
+          const model = input(entry.name, value => { entry.name = value; save(status); });
+          const search = document.createElement('button'); search.type = 'button'; search.textContent = 'Search';
+          search.setAttribute('aria-label', `Search ${label} models`);
+          const choices = document.createElement('select'); choices.hidden = true;
+          search.addEventListener('click', async () => {
+            search.disabled = true;
+            try {
+              const found = await store?.searchModels?.(entry.provider, model.value, 'chat', entry.api_base || '');
+              choices.replaceChildren();
+              for (const value of found || []) {
+                const option = document.createElement('option'); option.value = value; option.textContent = value; choices.append(option);
+              }
+              choices.hidden = !choices.options.length;
+              if (!choices.options.length) status.textContent = 'No models found';
+            } catch { status.textContent = 'Model search unavailable'; }
+            finally { search.disabled = false; }
+          });
+          choices.addEventListener('change', () => { model.value = choices.value; entry.name = choices.value; save(status); });
+          const modelControl = document.createElement('div'); modelControl.append(model, search, choices);
+          details.append(field('Model name', 'Exact model identifier. Search models from the selected provider.', modelControl));
+          details.append(field('API base URL', 'Custom endpoint; leave empty for provider default.',
+            input(entry.api_base, value => { entry.api_base = value; save(status); }, 'url')));
+          const key = document.createElement('input'); key.type = 'password'; key.autocomplete = 'new-password';
+          key.placeholder = 'Leave blank to keep existing key';
+          const keyButton = document.createElement('button'); keyButton.type = 'button'; keyButton.textContent = 'Save key';
+          keyButton.addEventListener('click', async () => {
+            if (!entry.provider || !key.value) return;
+            try {
+              const result = await api('/plugins/_model_config/api_keys', { action: 'set', keys: { [entry.provider]: key.value } });
+              status.textContent = result.ok ? 'Key saved' : 'Key not saved'; key.value = '';
+            } catch { status.textContent = 'Key not saved'; }
+          });
+          const keyControl = document.createElement('div'); keyControl.append(key, keyButton);
+          details.append(field('API key', 'Uses Agent Zero provider credential storage.', keyControl));
+        }
+        toggle.addEventListener('change', () => { entry.enabled = toggle.checked; render(); save(status); });
+        render();
+      }
+      status.textContent = ''; root.append(status); root.removeAttribute('aria-busy');
+    } catch { status.textContent = 'Auxiliary roles settings unavailable'; root.removeAttribute('aria-busy'); }
+  }
+
+  function scan() { document.querySelectorAll('.model-section, .preset-model-section').forEach(mount); }
+  document.addEventListener('DOMContentLoaded', scan, { once: true });
+  document.addEventListener('alpine:init', () => setTimeout(scan, 0));
+  new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true });
+  scan();
+})();
+</script>

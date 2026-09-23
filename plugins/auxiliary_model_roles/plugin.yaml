@@ -1,0 +1,9 @@
+name: auxiliary_model_roles
+title: Auxiliary Model Roles
+description: Optional Tool and Coding specialists delegated by Agent Zero's Main model.
+version: 0.1.0
+settings_sections:
+  - agent
+  - plugins
+per_project_config: true
+per_agent_config: true

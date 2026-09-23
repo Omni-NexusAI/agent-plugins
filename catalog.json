@@ -2,6 +2,7 @@
   "schema_version": 1,
   "plugins": [
     {"id": "_agentspine_identity", "source": "plugins/_agentspine_identity", "frameworks": ["Agentspine"], "status": "active", "distribution_repository": null},
+    {"id": "auxiliary_model_roles", "source": "plugins/auxiliary_model_roles", "frameworks": ["Agent Zero"], "status": "development", "distribution_repository": null},
     {"id": "_enhanced_mcp_config", "source": "plugins/_enhanced_mcp_config", "frameworks": ["Agentspine (historical snapshot)"], "status": "historical", "distribution_repository": null},
     {"id": "_enhanced_speech", "source": "plugins/_enhanced_speech", "frameworks": ["Agent Zero", "Agentspine"], "status": "active", "distribution_repository": null},
     {"id": "_multi_source_updater", "source": "plugins/_multi_source_updater", "frameworks": ["Agentspine"], "status": "active", "distribution_repository": null},

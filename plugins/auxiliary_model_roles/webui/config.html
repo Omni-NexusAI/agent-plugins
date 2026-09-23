@@ -1,0 +1,21 @@
+<html>
+<head><title>Auxiliary Model Roles</title></head>
+<body>
+  <div>
+    <div class="section-title">Auxiliary Model Roles</div>
+    <div class="section-description">Main delegates work to enabled specialists and receives the results through normal tool history.</div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Specialist timeout, seconds</div><div class="field-description">In-flight delegation escalates to Main after this limit.</div></div>
+      <div class="field-control"><input type="number" min="1" max="300" x-model.number="config.policy.timeout_seconds" /></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Maximum goal length</div><div class="field-description">Bounds the task description sent to a specialist.</div></div>
+      <div class="field-control"><input type="number" min="100" max="16000" x-model.number="config.policy.max_goal_chars" /></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">System 1 coordination</div><div class="field-description">If System 1 is installed, its Main-first default and precedence setting decide when it delegates here.</div></div>
+      <div class="field-control"><span role="status">Configured in System 1 settings</span></div>
+    </div>
+  </div>
+</body>
+</html>
