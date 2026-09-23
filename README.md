@@ -18,7 +18,7 @@ been verified.
 | --- | --- | --- |
 | [`_agentspine_identity`](plugins/_agentspine_identity/) | Agentspine | Active |
 | [`_multi_source_updater`](plugins/_multi_source_updater/) | Agentspine | Active |
-| Auxiliary model roles | Agent Zero | Planned; no package yet |
+| [`Auxiliary Model Roles`](plugins/auxiliary_model_roles/) | Agent Zero | Development; optional Tool and Coding specialists |
 | [`_enhanced_mcp_config`](plugins/_enhanced_mcp_config/) | Agentspine | Historical source only; excluded from releases |
 
 ### Multi-framework plugins and plans
@@ -51,9 +51,8 @@ part of this monorepo.
   distribution must include the shared code it needs. The monorepo is never a
   runtime dependency of an installed package.
 
-Convo and System 1 are planned portable plugins. The auxiliary model-role
-extension is planned as an Agent Zero package. This repository foundation does
-not contain their implementations.
+Convo and System 1 are planned portable plugins. Auxiliary Model Roles is an
+Agent Zero development package. Its Tool and Coding roles are disabled by default.
 
 ## Standalone repository sync
 

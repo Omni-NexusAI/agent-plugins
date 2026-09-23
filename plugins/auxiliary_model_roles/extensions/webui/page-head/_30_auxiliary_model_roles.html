@@ -1,0 +1,183 @@
+<script>
+(() => {
+  const plugin = 'auxiliary_model_roles';
+  const roles = [
+    ['tool', 'Tool', '(Optional) When enabled, a dedicated model handles delegated tool and computer-use steps, returning results or escalations to Main.'],
+    ['coding', 'Coding', '(Optional) When enabled, a dedicated model handles coding work delegated by Main and returns its results.']
+  ];
+  let settings;
+  let loading;
+  let saveTimer;
+  let modelStore;
+
+  async function api(path, body) {
+    const { fetchApi } = await import('/js/api.js');
+    const response = await fetchApi(path, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    if (!response.ok) throw new Error('Request failed');
+    return response.json();
+  }
+
+  function load() {
+    if (!loading) loading = Promise.all([
+      api('/plugins', { action: 'get_config', plugin_name: plugin }),
+      import('/plugins/_model_config/webui/model-config-store.js')
+    ]).then(async ([result]) => {
+      modelStore = globalThis.Alpine?.store?.('modelConfig');
+      await modelStore?.ensureLoaded?.();
+      settings = result.data || {};
+      return settings;
+    }).catch(error => { loading = null; throw error; });
+    return loading;
+  }
+
+  function field(title, description, control) {
+    const row = document.createElement('div'); row.className = 'field';
+    const label = document.createElement('div'); label.className = 'field-label';
+    const heading = document.createElement('div'); heading.className = 'field-title'; heading.textContent = title;
+    const help = document.createElement('div'); help.className = 'field-description'; help.textContent = description;
+    label.append(heading, help);
+    const holder = document.createElement('div'); holder.className = 'field-control'; holder.append(control);
+    row.append(label, holder); return row;
+  }
+
+  function save(status) {
+    clearTimeout(saveTimer); status.textContent = 'Unsaved changes';
+    saveTimer = setTimeout(async () => {
+      try {
+        const result = await api('/plugins', { action: 'save_config', plugin_name: plugin, settings });
+        status.textContent = result.ok ? 'Saved' : 'Unable to save';
+      } catch { status.textContent = 'Unable to save'; }
+    }, 350);
+  }
+
+  function input(value, callback, type = 'text') {
+    const control = document.createElement('input');
+    control.type = type; control.value = value || '';
+    control.addEventListener('input', () => callback(control.value));
+    return control;
+  }
+
+  function iconButton(icon, title) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'model-search-btn';
+    button.title = title; button.setAttribute('aria-label', title);
+    const glyph = document.createElement('x-icon'); glyph.setAttribute('name', icon); button.append(glyph);
+    return button;
+  }
+
+  function modelInput(entry, provider, status) {
+    const control = document.createElement('div'); control.style.position = 'relative'; control.style.width = '100%';
+    const model = input(entry.name, value => { entry.name = value; save(status); });
+    model.style.paddingRight = '32px'; model.style.width = '100%';
+    const search = iconButton('search', 'Search available models');
+    const results = document.createElement('div'); results.className = 'model-search-results'; results.hidden = true;
+    async function browse() {
+      if (!provider.value || search.disabled) return;
+      search.disabled = true; results.hidden = true;
+      try {
+        const found = await modelStore.searchModels(provider.value, model.value, 'chat', entry.api_base || '');
+        results.replaceChildren();
+        const groups = modelStore.groupResults(found || [], model.value);
+        for (const value of [...groups.matched, ...groups.rest]) {
+          const option = document.createElement('div'); option.className = 'model-search-item';
+          option.textContent = value; option.tabIndex = 0;
+          const select = () => { model.value = value; entry.name = value; results.hidden = true; save(status); model.focus(); };
+          option.addEventListener('click', select);
+          option.addEventListener('keydown', event => { if (event.key === 'Enter') select(); });
+          results.append(option);
+        }
+        if (!found?.length) {
+          const empty = document.createElement('div'); empty.className = 'model-search-item disabled';
+          empty.textContent = 'No models found'; results.append(empty);
+        }
+        results.hidden = false;
+      } catch { status.textContent = 'Model search unavailable'; }
+      finally { search.disabled = false; }
+    }
+    model.addEventListener('click', browse);
+    model.addEventListener('keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); browse(); }
+      if (event.key === 'Escape') results.hidden = true;
+    });
+    search.addEventListener('click', browse);
+    document.addEventListener('click', event => { if (!control.contains(event.target)) results.hidden = true; });
+    control.append(model, search, results); return control;
+  }
+
+  async function mount(section) {
+    if (section.querySelector(':scope > .auxiliary-roles-inline')) return;
+    const title = (section.querySelector(':scope > .section-title') ||
+      section.querySelector(':scope > .preset-model-heading > .section-title'))?.textContent?.trim();
+    if (title !== 'Main Model') return;
+    const root = document.createElement('div'); root.className = 'auxiliary-roles-inline';
+    root.setAttribute('aria-busy', 'true');
+    const status = document.createElement('div'); status.className = 'field-description';
+    status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+    status.textContent = 'Loading auxiliary roles…'; root.append(status); section.append(root);
+    try {
+      await load(); if (!root.isConnected) return;
+      root.replaceChildren();
+      for (const [key, label, description] of roles) {
+        const entry = settings[key] || (settings[key] = {});
+        const group = document.createElement('div'); group.className = 'aux-role-group';
+        const toggle = document.createElement('input'); toggle.type = 'checkbox';
+        toggle.checked = !!entry.enabled; toggle.setAttribute('aria-label', `${label} specialist`);
+        const switchLabel = document.createElement('label'); switchLabel.className = 'toggle';
+        const indicator = document.createElement('span'); indicator.className = 'toggler';
+        switchLabel.append(toggle, indicator);
+        group.append(field(`${label} model`, description, switchLabel));
+        const details = document.createElement('div'); group.append(details); root.append(group);
+        function render() {
+          details.replaceChildren(); details.hidden = !toggle.checked;
+          if (!toggle.checked) return;
+          const provider = document.createElement('select');
+          const empty = document.createElement('option'); empty.value = ''; empty.textContent = '— select —'; provider.append(empty);
+          for (const item of modelStore?.chatProviders || []) {
+            const option = document.createElement('option'); option.value = item.value; option.textContent = item.label; provider.append(option);
+          }
+          provider.value = entry.provider || '';
+          provider.addEventListener('change', () => {
+            entry.provider = provider.value; entry.name = ''; entry.api_base = '';
+            render(); save(status);
+          });
+          details.append(field('Provider', `LLM provider for the ${label} specialist.`, provider));
+          details.append(field('Model name', 'Model identifier. Click the field or search icon to browse available models.',
+            modelInput(entry, provider, status)));
+          const key = document.createElement('input'); key.type = 'password'; key.autocomplete = 'off';
+          key.placeholder = '••••••••••••'; key.style.paddingRight = '32px'; key.style.width = '100%';
+          const reveal = iconButton('visibility_off', 'Show API key');
+          reveal.addEventListener('click', () => {
+            const visible = key.type === 'password'; key.type = visible ? 'text' : 'password';
+            reveal.title = visible ? 'Hide API key' : 'Show API key'; reveal.setAttribute('aria-label', reveal.title);
+            reveal.firstElementChild?.setAttribute('name', visible ? 'visibility' : 'visibility_off');
+          });
+          key.addEventListener('change', async () => {
+            if (!entry.provider || !key.value) return;
+            const value = key.value; key.disabled = true;
+            try {
+              const result = await api('/plugins/_model_config/api_keys', { action: 'set', keys: { [entry.provider]: value } });
+              status.textContent = result.ok ? 'API key saved' : 'API key not saved';
+              if (result.ok) key.value = '';
+            } catch { status.textContent = 'API key not saved'; }
+            finally { key.disabled = false; }
+          });
+          const keyControl = document.createElement('div'); keyControl.style.position = 'relative'; keyControl.style.width = '100%'; keyControl.append(key, reveal);
+          details.append(field('API key', 'Authentication key for this provider.', keyControl));
+          details.append(field('API base URL', 'Custom endpoint URL. Leave empty to use the provider default.',
+            input(entry.api_base, value => { entry.api_base = value; save(status); })));
+        }
+        toggle.addEventListener('change', () => { entry.enabled = toggle.checked; render(); save(status); });
+        render();
+      }
+      status.textContent = ''; root.append(status); root.removeAttribute('aria-busy');
+    } catch { status.textContent = 'Auxiliary roles settings unavailable'; root.removeAttribute('aria-busy'); }
+  }
+
+  function scan() { document.querySelectorAll('.model-section, .preset-model-section').forEach(mount); }
+  document.addEventListener('DOMContentLoaded', scan, { once: true });
+  document.addEventListener('alpine:init', () => setTimeout(scan, 0));
+  new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true });
+  scan();
+})();
+</script>
