@@ -32,11 +32,12 @@ presets plus adjustable thresholds and bounded monitoring limits.
 ```yaml
 policy:
   actions:
-    show_browser_state:
-      description: Show the current browser state using the existing browser tool.
-      tool_name: browser_agent
+    recall_project_context:
+      description: Recall stored context about the current project.
+      tool_name: memory_load
       tool_args:
-        action: status
+        query: current project
+        limit: 3
 ```
 
 Only configure actions whose exact tool schema and permissions you have
