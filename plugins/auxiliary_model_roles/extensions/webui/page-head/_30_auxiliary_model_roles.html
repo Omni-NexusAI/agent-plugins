@@ -55,7 +55,7 @@
   function input(value, callback, type = 'text') {
     const control = document.createElement('input');
     control.type = type; control.value = value || '';
-    control.addEventListener('change', () => callback(control.value));
+    control.addEventListener('input', () => callback(control.value));
     return control;
   }
 
