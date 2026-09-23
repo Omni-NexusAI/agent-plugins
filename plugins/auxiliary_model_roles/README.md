@@ -4,6 +4,7 @@ This Agent Zero plugin adds optional Tool and Coding specialists under Main.
 Both are disabled until configured. The native provider credentials remain
 authoritative; enter a provider, model name, and optional API base. The models
 can be hosted or local through Agent Zero's existing provider support.
+Role settings are global across presets and agent profiles in this iteration.
 
 Main delegates a bounded goal through `auxiliary_delegate`. Tool may submit
 one strict JSON action to Agent Zero's native executor, which applies its

@@ -2,6 +2,8 @@
 
 This package owns optional Tool and Coding model roles for Agent Zero. Its
 config, UI, delegation tool, and model helper stay within this folder.
+The inline model controls and plugin page save global plugin config, so the
+manifest does not enable per-project or per-agent config scopes.
 
 Main owns delegation. Tool may submit one strict JSON request through the
 native host executor; it never runs a tool directly. Every call reads

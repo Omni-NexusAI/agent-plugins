@@ -5,5 +5,5 @@ version: 0.1.0
 settings_sections:
   - agent
   - plugins
-per_project_config: true
-per_agent_config: true
+per_project_config: false
+per_agent_config: false
