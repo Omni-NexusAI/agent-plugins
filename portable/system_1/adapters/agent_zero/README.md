@@ -8,6 +8,8 @@ provide this decision endpoint.
 
 The plugin is disabled by default. In the Main, Utility, and Embedding model
 sections, enable **System One Mode** and select a backend, model, and endpoint.
+These first-iteration mode settings are global across model presets and agent
+profiles; each model category has its own toggle and backend selection.
 For hosted Jev, set the configured environment variable (default
 `SYSTEM_1_JEV_API_KEY`) through Agent Zero's environment settings. A local
 decision endpoint needs no key unless your server requires one.
