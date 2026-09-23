@@ -12,15 +12,29 @@ frameworks, development status, and verified standalone distribution repository.
 A missing distribution repository means no automatic publication destination has
 been verified.
 
-| Source | Compatibility | Status |
+### Framework-specific plugins
+
+| Plugin | Framework | Status |
 | --- | --- | --- |
-| [`browser_session_sync`](plugins/browser_session_sync/) | Agent Zero and compatible Agentspine hosts | Active; verified [standalone repository](https://github.com/Omni-NexusAI/browser_session_sync) |
-| [`provider_profiles`](plugins/provider_profiles/) | Agent Zero and compatible Agentspine hosts | Active |
-| [`_enhanced_speech`](plugins/_enhanced_speech/) | Agent Zero and compatible Agentspine hosts | Active; voice compatibility changes are under review |
-| [`_agentspine_identity`](plugins/_agentspine_identity/) | Agentspine | Active, Agentspine-specific |
-| [`_multi_source_updater`](plugins/_multi_source_updater/) | Agentspine | Active, Agentspine-specific |
-| [`ai_link_bridge`](plugins/ai_link_bridge/) | Agent Zero and Agentspine integration target | Development scaffold; task dispatch is not implemented |
-| [`_enhanced_mcp_config`](plugins/_enhanced_mcp_config/) | Historical Agentspine snapshot | Historical source; excluded from releases |
+| [`_agentspine_identity`](plugins/_agentspine_identity/) | Agentspine | Active |
+| [`_multi_source_updater`](plugins/_multi_source_updater/) | Agentspine | Active |
+| Auxiliary model roles | Agent Zero | Planned; no package yet |
+| [`_enhanced_mcp_config`](plugins/_enhanced_mcp_config/) | Agentspine | Historical source only; excluded from releases |
+
+### Multi-framework plugins and plans
+
+| Plugin | Frameworks | Status |
+| --- | --- | --- |
+| [`browser_session_sync`](plugins/browser_session_sync/) | Agent Zero, Agentspine | Active; verified [standalone repository](https://github.com/Omni-NexusAI/browser_session_sync) |
+| [`provider_profiles`](plugins/provider_profiles/) | Agent Zero, Agentspine | Active |
+| [`_enhanced_speech`](plugins/_enhanced_speech/) | Agent Zero, Agentspine | Active; voice compatibility changes are under review |
+| [`ai_link_bridge`](plugins/ai_link_bridge/) | Agent Zero, Agentspine target | Development scaffold; task dispatch is not implemented |
+| Convo | Multiple frameworks planned | Planned; no package yet |
+| System 1 | Multiple frameworks planned, starting with Agent Zero | Planned; no package yet |
+
+The existing packages listed for both frameworks use Agent Zero-style packaging;
+they do not yet use the planned shared `portable/` core and adapters. A planned
+entry is an architectural direction, not an installable plugin.
 
 The [source sync record](CONTAINER_SYNC.md) describes the origins and
 compatibility boundaries of the existing packages. The separate
