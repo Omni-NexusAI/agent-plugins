@@ -162,7 +162,15 @@ def publish(entry: dict) -> None:
             print(f"{plugin_id}: standalone repository is already current")
             return
         print(run("git", "diff", "--cached", "--stat", cwd=checkout))
-        run("git", "commit", "-m", f"Sync {plugin_id} from Agent Plugins", cwd=checkout)
+        account = json.loads(run("gh", "api", "user", "--jq", "{id: .id, login: .login}"))
+        account_id, login = account.get("id"), account.get("login")
+        if not isinstance(account_id, int) or not isinstance(login, str) or not login:
+            raise SyncError("Cannot determine the authenticated GitHub commit author")
+        run(
+            "git", "-c", f"user.name={login}",
+            "-c", f"user.email={account_id}+{login}@users.noreply.github.com",
+            "commit", "-m", f"Sync {plugin_id} from Agent Plugins", cwd=checkout,
+        )
         run("git", "push", "--set-upstream", "origin", branch, cwd=checkout)
         body = (
             f"Sync the tracked {plugin_id} package from Omni-NexusAI/agent-plugins.\n\n"
@@ -195,7 +203,7 @@ def main() -> int:
         else:
             preview(selected)
         return 0
-    except (SyncError, subprocess.CalledProcessError, OSError, UnicodeError) as error:
+    except (SyncError, subprocess.CalledProcessError, OSError, UnicodeError, ValueError) as error:
         print(f"sync-to-repos: {error}", file=sys.stderr)
         return 2
 
