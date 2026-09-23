@@ -9,8 +9,10 @@ class SystemOneUtility(Extension):
             if isinstance(system, str):
                 if "previous memories are stored" in system:
                     purpose = "retrieval query preparation"
-                elif "notes about information worth memorizing" in system:
+                elif "HISTORY worth memorizing" in system:
                     purpose = "memory ingestion"
+                elif "enumerated list of MEMORIES" in system:
+                    purpose = "memory retrieval filtering"
                 else:
                     purpose = ""
                 if purpose and await memory_decision(self.agent, call_data.get("message", ""), purpose) == "precise":

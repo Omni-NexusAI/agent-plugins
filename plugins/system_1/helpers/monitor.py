@@ -26,6 +26,8 @@ async def monitor(agent, section: dict, policy: dict) -> None:
         return
     while checks > 0 and time.monotonic() < deadline:
         await asyncio.sleep(interval)
+        if not config_for(agent, "main"):
+            return
         event = getattr(agent, "intervention", None)
         if not event or event == last_event:
             continue
