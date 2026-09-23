@@ -68,7 +68,7 @@
     const input = document.createElement('input');
     input.type = type;
     input.value = value || '';
-    input.addEventListener('change', () => onChange(input.value));
+    input.addEventListener('input', () => onChange(input.value));
     return input;
   }
 
@@ -81,9 +81,9 @@
   }
 
   function modelInput(entry, provider, status) {
-    const control = document.createElement('div'); control.style.position = 'relative';
+    const control = document.createElement('div'); control.style.position = 'relative'; control.style.width = '100%';
     const input = textInput(entry.model, value => { entry.model = value; saveLater(status); });
-    input.style.paddingRight = '32px';
+    input.style.paddingRight = '32px'; input.style.width = '100%';
     const searchButton = iconButton('search', 'Search available models');
     const results = document.createElement('div'); results.className = 'model-search-results'; results.hidden = true;
     async function search() {
@@ -181,7 +181,7 @@
           modelInput(entry, provider, status)));
         const credential = document.createElement('input');
         credential.type = 'password'; credential.autocomplete = 'off';
-        credential.placeholder = '••••••••••••'; credential.style.paddingRight = '32px';
+        credential.placeholder = '••••••••••••'; credential.style.paddingRight = '32px'; credential.style.width = '100%';
         const reveal = iconButton('visibility_off', 'Show API key');
         reveal.addEventListener('click', () => {
           const visible = credential.type === 'password';
@@ -203,7 +203,7 @@
           finally { credential.disabled = false; }
         });
         const control = document.createElement('div');
-        control.style.position = 'relative'; control.append(credential, reveal);
+        control.style.position = 'relative'; control.style.width = '100%'; control.append(credential, reveal);
         details.append(field('API key', 'Authentication key for this provider.', control));
         details.append(field('API base URL', 'Custom endpoint URL. Leave empty to use the provider default.',
           textInput(entry.endpoint, value => { entry.endpoint = value; saveLater(status); })));
