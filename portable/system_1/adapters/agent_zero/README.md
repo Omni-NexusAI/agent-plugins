@@ -1,8 +1,9 @@
 # System 1 for Agent Zero
 
 This plugin adds finite-choice routing in front of Agent Zero's Main model.
-It supports TypeSafe Jev and the `parallel-decision` llama.cpp fork's
-`POST /v1/decision`. Configure the existing services; installation never
+It supports TypeSafe Jev directly, Jev through OpenRouter's Decisions API,
+the `parallel-decision` llama.cpp fork's `POST /v1/decision`, and the host's
+standard chat providers for bounded routing. Configure existing services; installation never
 downloads a model or starts a server. The standard llama.cpp server does not
 provide this decision endpoint.
 
@@ -11,7 +12,12 @@ sections, enable **System One Mode** and select a backend, model, and endpoint.
 These first-iteration mode settings are global across model presets and agent
 profiles; each model category has its own toggle and backend selection.
 For hosted Jev, set the configured environment variable (default
-`SYSTEM_1_JEV_API_KEY`) through Agent Zero's environment settings. A local
+`SYSTEM_1_JEV_API_KEY`) through Agent Zero's environment settings. OpenRouter
+uses Agent Zero's shared OpenRouter key and its Decisions API; the model
+`typesafe/jev-latest` is mapped to OpenRouter's `~typesafe/jev-latest` alias.
+Other native chat providers use Agent Zero's model configuration and credentials
+for routing, but their self-reported confidence is not trusted for direct fixed
+action dispatch. A local
 decision endpoint needs no key unless your server requires one.
 
 Main can choose only from `policy.actions` and the Main fallback. Each action

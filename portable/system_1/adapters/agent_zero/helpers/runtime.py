@@ -29,14 +29,63 @@ def config_for(agent, section: str) -> tuple[dict, dict] | None:
 
 
 def client_for(section_config: dict, policy: dict) -> DecisionClient:
+    backend = section_config.get("backend", "")
     token_env = section_config.get("token_env", "")
+    if backend == "openrouter":
+        token_env = "API_KEY_OPENROUTER"
     token = os.environ.get(token_env, "") if isinstance(token_env, str) and token_env else ""
-    if section_config.get("backend") == "jev" and not token:
-        raise DecisionError("Jev key is unavailable; configure the named environment variable")
-    return DecisionClient(backend=section_config.get("backend", ""),
+    if backend in {"jev", "openrouter"} and not token:
+        raise DecisionError(f"{backend} key is unavailable")
+    if backend == "chat":
+        return ChatDecisionClient(section_config, policy)
+    return DecisionClient(backend=backend,
                           model=section_config.get("model", ""),
                           endpoint=section_config.get("endpoint", ""), token=token,
                           timeout=float(policy.get("timeout_seconds", 2)))
+
+
+class ChatDecisionClient:
+    """Use Agent Zero's configured provider for bounded routing decisions.
+
+    Chat-model confidence is self-reported, so callers must never dispatch
+    fixed host actions based on this backend's answer.
+    """
+
+    def __init__(self, section_config: dict, policy: dict):
+        self.section_config = section_config
+        self.timeout = float(policy.get("timeout_seconds", 2))
+
+    async def choose(self, state: str, choices: dict):
+        import asyncio
+        import models
+        from plugins._model_config.helpers.model_config import build_model_config
+        from usr.plugins.system_1.helpers.system_1_core.decision import Decision
+
+        provider = self.section_config.get("provider", "")
+        model_name = self.section_config.get("model", "")
+        if not provider or not model_name or not 2 <= len(choices) <= 255:
+            raise DecisionError("A provider, model, and finite choices are required")
+        slot = {"provider": provider, "name": model_name,
+                "api_base": self.section_config.get("endpoint", "")}
+        cfg = build_model_config(slot, models.ModelType.CHAT)
+        model = models.get_chat_model(cfg.provider, cfg.name,
+                                      model_config=cfg, **cfg.build_kwargs())
+        instruction = ("Choose exactly one of the given options. Return only a JSON object "
+                       'with {"choice":"option_id","confidence":0.0}. Confidence is your '
+                       "estimated probability from 0 to 1. Never invent an option.")
+        answer, _ = await asyncio.wait_for(model.unified_call(
+            system_message=instruction,
+            user_message=json.dumps({"state": state, "choices": choices})),
+            timeout=self.timeout)
+        try:
+            parsed = json.loads(answer)
+            choice = parsed["choice"]
+            confidence = float(parsed["confidence"])
+            if choice not in choices or not 0 <= confidence <= 1:
+                raise ValueError("Invalid choice")
+            return Decision(choice, confidence, "chat")
+        except (TypeError, KeyError, ValueError) as error:
+            raise DecisionError("Chat provider returned no valid finite choice") from error
 
 
 def allowed_actions(policy: dict) -> dict:
@@ -94,7 +143,8 @@ async def main_decision(agent) -> str | None:
                 current_roles = {}
             if role in current_roles:
                 return delegation_action(role, text)
-        action = selected_action(result, actions, threshold=float(policy.get("min_choice_probability", 0.85)))
+        action = None if result.backend == "chat" else selected_action(
+            result, actions, threshold=float(policy.get("min_choice_probability", 0.85)))
         if action:
             return json.dumps(action, separators=(",", ":"))
     except (DecisionError, ValueError, TypeError, OSError):

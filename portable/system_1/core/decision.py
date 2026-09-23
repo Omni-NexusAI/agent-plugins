@@ -44,18 +44,20 @@ def _post(url: str, payload: dict, token: str, timeout: float) -> dict:
 
 class DecisionClient:
     def __init__(self, *, backend: str, model: str, endpoint: str = "", token: str = "", timeout: float = 2.0):
-        if backend not in {"jev", "llama_decision"}:
+        if backend not in {"jev", "openrouter", "llama_decision"}:
             raise ValueError("Unsupported decision backend")
         if not model.strip():
             raise ValueError("Decision model is required")
         if not 0.1 <= timeout <= 30:
             raise ValueError("Decision timeout must be between 0.1 and 30 seconds")
         self.backend, self.model, self.token, self.timeout = backend, model.strip(), token, timeout
-        self.endpoint = endpoint.strip() or ("https://api.typesafe.ai/v1/systemone" if backend == "jev" else "")
+        defaults = {"jev": "https://api.typesafe.ai/v1/systemone",
+                    "openrouter": "https://openrouter.ai/api/alpha/decisions"}
+        self.endpoint = endpoint.strip() or defaults.get(backend, "")
         if not self.endpoint.startswith(("http://", "https://")):
             raise ValueError("Decision endpoint must be HTTP(S)")
-        if backend == "jev" and not self.endpoint.startswith("https://"):
-            raise ValueError("Hosted Jev requires HTTPS")
+        if backend in {"jev", "openrouter"} and not self.endpoint.startswith("https://"):
+            raise ValueError("Hosted decision services require HTTPS")
 
     async def choose(self, state: str, choices: Mapping[str, str]) -> Decision:
         if not state or len(state) > 16_000:
@@ -63,8 +65,11 @@ class DecisionClient:
         if not 2 <= len(choices) <= 255 or any(not key or not isinstance(value, str) for key, value in choices.items()):
             raise ValueError("Decision choices must be 2 to 255 named descriptions")
         ids = list(choices)
-        if self.backend == "jev":
-            payload = {"state": state, "model": self.model, "questions": {"route": {
+        if self.backend in {"jev", "openrouter"}:
+            model = self.model
+            if self.backend == "openrouter" and model == "typesafe/jev-latest":
+                model = "~typesafe/jev-latest"
+            payload = {"state": state, "model": model, "questions": {"route": {
                 "type": "choice", "instructions": "Select exactly one permitted next step for this agent state.",
                 "criteria": dict(choices)}}}
             url = self.endpoint
@@ -77,7 +82,7 @@ class DecisionClient:
                 url += "/v1/decision"
         try:
             result = await asyncio.to_thread(_post, url, payload, self.token, self.timeout)
-            if self.backend == "jev":
+            if self.backend in {"jev", "openrouter"}:
                 answer = result["answers"]["route"]
                 choice = answer["choice"]
                 confidence = answer["probabilities"][choice]

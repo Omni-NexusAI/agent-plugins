@@ -11,6 +11,9 @@
 - The assembled package must run without this source tree.
 - Only the host may execute actions. Decisions select predeclared actions with exact arguments.
 - A backend failure escalates to the existing model and never switches providers silently.
+- OpenRouter Jev uses the Decisions API and its shared Agent Zero provider key.
+  Native chat providers may route, but their self-reported confidence never
+  authorizes direct fixed action dispatch.
 - Embedding vectors remain the host embedding model's output.
 - Keep memory and monitoring work bounded. No background task may mutate agent state directly.
 - On the current Agent Zero host, the first model turn is loop iteration zero;
