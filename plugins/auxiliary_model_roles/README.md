@@ -5,9 +5,10 @@ Both are disabled until configured. The native provider credentials remain
 authoritative; enter a provider, model name, and optional API base. The models
 can be hosted or local through Agent Zero's existing provider support.
 
-Main delegates a bounded goal through `auxiliary_delegate`. Tool returns
-proposed actions and observations to Main, which uses the normal Agent Zero
-tool path for any action. Coding returns code or findings to Main. Neither
+Main delegates a bounded goal through `auxiliary_delegate`. Tool may submit
+one strict JSON action to Agent Zero's native executor, which applies its
+normal permission and history path. It then returns the outcome or an
+escalation to Main. Coding returns code or findings to Main. Neither
 specialist silently takes over the Utility model or creates a Computer model
 category. Turning a role off prevents new delegation immediately; an in-flight
 model request completes or reaches its timeout.

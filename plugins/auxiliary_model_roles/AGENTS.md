@@ -3,8 +3,8 @@
 This package owns optional Tool and Coding model roles for Agent Zero. Its
 config, UI, delegation tool, and model helper stay within this folder.
 
-Main owns delegation. The specialist returns a result through the normal tool
-history; it does not directly execute arbitrary host tools. Every call reads
+Main owns delegation. Tool may submit one strict JSON request through the
+native host executor; it never runs a tool directly. Every call reads
 current enablement so disabling a role takes effect on the next dispatch.
 The plugin can run without System 1. When System 1 is installed, its optional
 finite-choice route may invoke the same delegation tool through the host.

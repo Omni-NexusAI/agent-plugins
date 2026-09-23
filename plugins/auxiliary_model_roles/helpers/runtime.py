@@ -8,7 +8,7 @@ from helpers import plugins
 
 
 PLUGIN = "auxiliary_model_roles"
-ROLES = {"tool", "coding"}
+ROLES = ("tool", "coding")
 
 
 def available_roles(agent) -> dict[str, dict]:
@@ -44,9 +44,11 @@ async def delegate(agent, role: str, goal: str) -> str:
     model = models.get_chat_model(model_config.provider, model_config.name,
                                   model_config=model_config, **model_config.build_kwargs())
     if role == "tool":
-        instruction = ("You are a Tool specialist working for Agent Zero Main. Return concise findings "
-                       "and any proposed tool name and arguments as a JSON object. Do not claim a tool was "
-                       "executed. Main will decide and perform authorized actions through the host.")
+        instruction = ("You are a Tool specialist working for Agent Zero Main. "
+                       "For one concrete action, return only a JSON object with tool_name and tool_args. "
+                       "The Agent Zero host will validate and execute it under its normal permissions. "
+                       "For uncertain or open-ended work, explain the escalation to Main in plain text. "
+                       "Never claim that an unexecuted action succeeded.")
     else:
         instruction = ("You are a Coding specialist working for Agent Zero Main. Solve the delegated "
                        "coding goal and return code, reasoning, test results or a precise escalation. "
