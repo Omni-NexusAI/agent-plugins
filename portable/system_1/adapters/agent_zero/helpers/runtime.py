@@ -78,9 +78,19 @@ async def main_decision(agent) -> str | None:
     try:
         client = client_for(section, policy)
         result = await client.choose(text[:int(policy.get("max_state_chars", 4000))], choices)
+        latest = config_for(agent, "main")
+        if not latest:
+            return None
+        policy = latest[1]
+        actions = allowed_actions(policy)
         if result.choice.startswith("specialist_") and result.confidence >= float(policy.get("min_choice_probability", 0.85)):
             role = result.choice.removeprefix("specialist_")
-            if role in roles:
+            try:
+                from usr.plugins.auxiliary_model_roles.helpers.runtime import available_roles
+                current_roles = available_roles(agent)
+            except ImportError:
+                current_roles = {}
+            if role in current_roles:
                 return delegation_action(role, text)
         action = selected_action(result, actions, threshold=float(policy.get("min_choice_probability", 0.85)))
         if action:

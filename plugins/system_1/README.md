@@ -26,6 +26,9 @@ Embedding decisions guide the existing memory plugin's query preparation and
 ingestion summaries; the configured embedding model and vector index remain
 unchanged. The plugin page has Fast, Balanced, and Conservative starting
 presets plus adjustable thresholds and bounded monitoring limits.
+The first monitor observes native user interventions while Main works and asks
+the host loop to process high-priority ones; it stops after its configured time
+or check limit. Other event sources require a future host adapter.
 
 ## Fixed action example
 

@@ -48,6 +48,15 @@ class RoutingTests(unittest.TestCase):
         self.config["main"]["enabled"] = False
         self.assertIsNone(asyncio.run(self.runtime.main_decision(Agent())))
 
+    def test_disabling_during_backend_call_prevents_late_dispatch(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        self.config["policy"]["actions"] = {"memory": {"tool_name": "memory_load", "tool_args": {"query": "test"}}}
+        async def decide(state, choices):
+            self.config["main"]["enabled"] = False
+            return types.SimpleNamespace(choice="memory", confidence=0.99)
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(Agent())))
+
 
 if __name__ == "__main__":
     unittest.main()
