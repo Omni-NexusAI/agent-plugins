@@ -17,7 +17,9 @@ contains a fixed `tool_name` and `tool_args`. The decision model cannot generate
 arbitrary arguments. Agent Zero still validates and executes the chosen tool
 under its usual permissions and history. Empty or uncertain choices, service
 errors, and open-ended work go to Main. With an empty action map, System 1
-observes routing but no actions can be dispatched.
+has no direct actions to dispatch. If Auxiliary Model Roles is installed and
+configured, System 1 may delegate a Tool or Coding goal through Agent Zero's
+normal `auxiliary_delegate` tool. The specialist result returns to Main.
 
 Utility decisions add conservative instructions to eligible utility requests.
 Embedding decisions guide the existing memory plugin's query preparation and

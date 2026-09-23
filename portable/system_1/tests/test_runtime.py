@@ -1,0 +1,53 @@
+import asyncio
+import importlib.util
+import json
+from pathlib import Path
+import sys
+import types
+import unittest
+from unittest.mock import patch
+
+
+SOURCE = Path(__file__).resolve().parents[1] / "adapters" / "agent_zero" / "helpers" / "runtime.py"
+
+
+class Agent:
+    loop_data = types.SimpleNamespace(iteration=1)
+    last_user_message = types.SimpleNamespace(output_text=lambda: "Inspect this page")
+
+
+class RoutingTests(unittest.TestCase):
+    def setUp(self):
+        self.config = {"main": {"enabled": True, "backend": "jev", "model": "jev-latest"},
+                       "policy": {"action_precedence": "tool_first", "actions": {}}}
+        helpers = types.ModuleType("helpers")
+        helpers.plugins = types.SimpleNamespace(get_plugin_config=lambda _name, _agent: self.config)
+        core = types.ModuleType("usr.plugins.system_1.helpers.system_1_core")
+        core.DecisionClient = object
+        core.DecisionError = RuntimeError
+        decision = types.ModuleType(core.__name__ + ".decision")
+        decision.selected_action = lambda *args, **kwargs: None
+        auxiliary = types.ModuleType("usr.plugins.auxiliary_model_roles.helpers.runtime")
+        auxiliary.available_roles = lambda agent: {"tool": {"enabled": True}}
+        self.modules = patch.dict(sys.modules, {"helpers": helpers, core.__name__: core,
+                                                decision.__name__: decision, auxiliary.__name__: auxiliary})
+        self.modules.start()
+        spec = importlib.util.spec_from_file_location("system_one_runtime_test", SOURCE)
+        self.runtime = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.runtime)
+
+    def tearDown(self):
+        self.modules.stop()
+
+    def test_tool_first_uses_normal_host_delegation_tool(self):
+        result = asyncio.run(self.runtime.main_decision(Agent()))
+        self.assertEqual(json.loads(result), {"tool_name": "auxiliary_delegate",
+                                               "tool_args": {"role": "tool", "goal": "Inspect this page"}})
+
+    def test_disabled_main_escalates(self):
+        self.config["main"]["enabled"] = False
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(Agent())))
+
+
+if __name__ == "__main__":
+    unittest.main()

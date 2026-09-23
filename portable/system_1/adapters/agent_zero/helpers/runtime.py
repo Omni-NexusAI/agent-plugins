@@ -11,7 +11,11 @@ from usr.plugins.system_1.helpers.system_1_core.decision import selected_action
 
 
 PLUGIN = "system_1"
-SPECIALIST_ROUTE_KEY = "system_1_specialist_route"
+
+
+def delegation_action(role: str, goal: str) -> str:
+    return json.dumps({"tool_name": "auxiliary_delegate", "tool_args": {
+        "role": role, "goal": goal[:8000]}}, separators=(",", ":"))
 
 
 def config_for(agent, section: str) -> tuple[dict, dict] | None:
@@ -54,7 +58,6 @@ async def main_decision(agent) -> str | None:
     if not settings:
         return None
     section, policy = settings
-    agent.set_data(SPECIALIST_ROUTE_KEY, "")
     text = agent.last_user_message.output_text() if agent.last_user_message else ""
     if not text.strip():
         return None
@@ -67,8 +70,7 @@ async def main_decision(agent) -> str | None:
     except ImportError:
         roles = {}
     if policy.get("action_precedence") == "tool_first" and "tool" in roles:
-        agent.set_data(SPECIALIST_ROUTE_KEY, "tool")
-        return None
+        return delegation_action("tool", text)
     for role in roles:
         choices[f"specialist_{role}"] = f"Delegate a bounded {role} task to the configured specialist."
     if len(choices) < 2:
@@ -77,8 +79,9 @@ async def main_decision(agent) -> str | None:
         client = client_for(section, policy)
         result = await client.choose(text[:int(policy.get("max_state_chars", 4000))], choices)
         if result.choice.startswith("specialist_") and result.confidence >= float(policy.get("min_choice_probability", 0.85)):
-            agent.set_data(SPECIALIST_ROUTE_KEY, result.choice.removeprefix("specialist_"))
-            return None
+            role = result.choice.removeprefix("specialist_")
+            if role in roles:
+                return delegation_action(role, text)
         action = selected_action(result, actions, threshold=float(policy.get("min_choice_probability", 0.85)))
         if action:
             return json.dumps(action, separators=(",", ":"))
