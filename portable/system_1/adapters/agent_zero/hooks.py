@@ -20,4 +20,6 @@ def save_plugin_config(result=None, settings=None, **kwargs):
             raise ValueError("System 1 probability threshold must be between 0 and 1")
         if policy.get("action_precedence", "main_first") not in {"main_first", "tool_first"}:
             raise ValueError("Unknown System 1 action precedence")
+        if policy.get("preset", "balanced") not in {"fast", "balanced", "conservative"}:
+            raise ValueError("Unknown System 1 preset")
     return settings

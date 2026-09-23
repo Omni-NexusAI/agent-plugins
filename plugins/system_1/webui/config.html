@@ -1,14 +1,22 @@
 <html>
 <head><title>System 1</title></head>
 <body>
-  <div x-data="{ status: 'Not checked', busy: false,
+  <div x-data="{ status: 'Not checked', busy: false, section: 'main',
+    applyPreset() {
+      const presets = {
+        fast: { min_choice_probability: 0.7, timeout_seconds: 1.0, monitor_interval_seconds: 0.25 },
+        balanced: { min_choice_probability: 0.85, timeout_seconds: 2.0, monitor_interval_seconds: 0.5 },
+        conservative: { min_choice_probability: 0.95, timeout_seconds: 3.0, monitor_interval_seconds: 1.0 }
+      };
+      Object.assign(config.policy, presets[config.policy.preset] || presets.balanced);
+    },
     async check() {
       this.busy = true;
       try {
         const { fetchApi } = await import('/js/api.js');
         const response = await fetchApi('/plugins/system_1/status', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ section: 'main', check: true })
+          body: JSON.stringify({ section: this.section, check: true })
         });
         const result = await response.json();
         this.status = result.status || 'Unavailable';
@@ -18,8 +26,12 @@
     <div class="section-title">System 1</div>
     <div class="section-description">Finite-choice decisions use the selected backend. Agent Zero still validates and executes actions.</div>
     <div class="field">
-      <div class="field-label"><div class="field-title">Main backend status</div><div class="field-description">Checks the configured decision service on request.</div></div>
-      <div class="field-control"><button type="button" @click="check()" :disabled="busy">Check connection</button><span role="status" aria-live="polite" x-text="busy ? 'Checking…' : status"></span></div>
+      <div class="field-label"><div class="field-title">Backend status</div><div class="field-description">Checks the selected decision service on request.</div></div>
+      <div class="field-control"><select x-model="section"><option value="main">Main</option><option value="utility">Utility</option><option value="embedding">Embedding</option></select><button type="button" @click="check()" :disabled="busy">Check connection</button><span role="status" aria-live="polite" x-text="busy ? 'Checking…' : status"></span></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Decision preset</div><div class="field-description">Starting values for confidence, timeout, and monitoring. Each can be adjusted below.</div></div>
+      <div class="field-control"><select x-model="config.policy.preset" @change="applyPreset()"><option value="fast">Fast</option><option value="balanced">Balanced</option><option value="conservative">Conservative</option></select></div>
     </div>
     <div class="field">
       <div class="field-label"><div class="field-title">Action eligibility</div><div class="field-description">Exact tool names and arguments that System 1 may select. Other actions escalate to Main.</div></div>

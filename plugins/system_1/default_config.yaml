@@ -17,6 +17,7 @@ embedding:
   endpoint: https://api.typesafe.ai/v1/systemone
   token_env: SYSTEM_1_JEV_API_KEY
 policy:
+  preset: balanced
   min_choice_probability: 0.85
   timeout_seconds: 2.0
   max_state_chars: 4000

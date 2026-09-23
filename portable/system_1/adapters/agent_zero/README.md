@@ -24,7 +24,8 @@ normal `auxiliary_delegate` tool. The specialist result returns to Main.
 Utility decisions add conservative instructions to eligible utility requests.
 Embedding decisions guide the existing memory plugin's query preparation and
 ingestion summaries; the configured embedding model and vector index remain
-unchanged. Configure thresholds and bounded monitoring on the plugin page.
+unchanged. The plugin page has Fast, Balanced, and Conservative starting
+presets plus adjustable thresholds and bounded monitoring limits.
 
 ## Fixed action example
 
