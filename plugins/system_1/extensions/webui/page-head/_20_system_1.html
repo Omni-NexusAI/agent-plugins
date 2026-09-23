@@ -90,7 +90,11 @@
       if (searchButton.disabled || ['jev', 'llama_decision'].includes(provider.value)) return;
       searchButton.disabled = true; results.hidden = true;
       try {
-        const found = await modelStore.searchModels(provider.value, input.value, 'chat', entry.endpoint || '');
+        const nativeModels = await modelStore.searchModels(provider.value, input.value, 'chat', entry.endpoint || '');
+        // OpenRouter's decision-only Jev endpoint is absent from its chat-model catalog.
+        const decisionModels = provider.value === 'openrouter' && (!input.value || 'typesafe/jev-latest'.includes(input.value.toLowerCase()))
+          ? ['typesafe/jev-latest'] : [];
+        const found = [...new Set([...(nativeModels || []), ...decisionModels])];
         results.replaceChildren();
         const groups = modelStore.groupResults(found || [], input.value);
         for (const value of [...groups.matched, ...groups.rest]) {
@@ -101,7 +105,7 @@
           option.addEventListener('keydown', event => { if (event.key === 'Enter') select(); });
           results.append(option);
         }
-        if (!found?.length) {
+        if (!found.length) {
           const empty = document.createElement('div'); empty.className = 'model-search-item disabled';
           empty.textContent = 'No models found'; results.append(empty);
         }
