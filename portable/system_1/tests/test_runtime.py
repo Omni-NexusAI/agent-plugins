@@ -12,7 +12,7 @@ SOURCE = Path(__file__).resolve().parents[1] / "adapters" / "agent_zero" / "help
 
 
 class Agent:
-    loop_data = types.SimpleNamespace(iteration=1)
+    loop_data = types.SimpleNamespace(iteration=0)
     last_user_message = types.SimpleNamespace(output_text=lambda: "Inspect this page")
 
 
@@ -47,6 +47,11 @@ class RoutingTests(unittest.TestCase):
     def test_disabled_main_escalates(self):
         self.config["main"]["enabled"] = False
         self.assertIsNone(asyncio.run(self.runtime.main_decision(Agent())))
+
+    def test_later_iterations_leave_tool_results_to_host(self):
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=1)
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
 
     def test_disabling_during_backend_call_prevents_late_dispatch(self):
         self.config["policy"]["action_precedence"] = "main_first"

@@ -13,6 +13,8 @@
 - A backend failure escalates to the existing model and never switches providers silently.
 - Embedding vectors remain the host embedding model's output.
 - Keep memory and monitoring work bounded. No background task may mutate agent state directly.
+- On the current Agent Zero host, the first model turn is loop iteration zero;
+  fast actions may run there once, then later iterations belong to the host.
 
 ## Verification
 

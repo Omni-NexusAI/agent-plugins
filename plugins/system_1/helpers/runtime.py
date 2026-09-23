@@ -52,7 +52,9 @@ def allowed_actions(policy: dict) -> dict:
 async def main_decision(agent) -> str | None:
     # A fixed action is eligible only once per user turn. Later iterations
     # belong to the host's tool-result/reasoning loop.
-    if getattr(getattr(agent, "loop_data", None), "iteration", 0) != 1:
+    # Agent Zero initializes LoopData.iteration to -1 and increments it to 0
+    # before the first model call. Later iterations belong to the host loop.
+    if getattr(getattr(agent, "loop_data", None), "iteration", -1) != 0:
         return None
     settings = config_for(agent, "main")
     if not settings:
