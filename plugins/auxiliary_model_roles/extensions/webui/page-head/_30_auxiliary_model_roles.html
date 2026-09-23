@@ -8,6 +8,7 @@
   let settings;
   let loading;
   let saveTimer;
+  let modelStore;
 
   async function api(path, body) {
     const { fetchApi } = await import('/js/api.js');
@@ -19,8 +20,15 @@
   }
 
   function load() {
-    if (!loading) loading = api('/plugins', { action: 'get_config', plugin_name: plugin })
-      .then(result => { settings = result.data || {}; return settings; });
+    if (!loading) loading = Promise.all([
+      api('/plugins', { action: 'get_config', plugin_name: plugin }),
+      import('/plugins/_model_config/webui/model-config-store.js')
+    ]).then(async ([result]) => {
+      modelStore = globalThis.Alpine?.store?.('modelConfig');
+      await modelStore?.ensureLoaded?.();
+      settings = result.data || {};
+      return settings;
+    }).catch(error => { loading = null; throw error; });
     return loading;
   }
 
@@ -51,6 +59,52 @@
     return control;
   }
 
+  function iconButton(icon, title) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'model-search-btn';
+    button.title = title; button.setAttribute('aria-label', title);
+    const glyph = document.createElement('x-icon'); glyph.setAttribute('name', icon); button.append(glyph);
+    return button;
+  }
+
+  function modelInput(entry, provider, status) {
+    const control = document.createElement('div'); control.style.position = 'relative'; control.style.width = '100%';
+    const model = input(entry.name, value => { entry.name = value; save(status); });
+    model.style.paddingRight = '32px'; model.style.width = '100%';
+    const search = iconButton('search', 'Search available models');
+    const results = document.createElement('div'); results.className = 'model-search-results'; results.hidden = true;
+    async function browse() {
+      if (!provider.value || search.disabled) return;
+      search.disabled = true; results.hidden = true;
+      try {
+        const found = await modelStore.searchModels(provider.value, model.value, 'chat', entry.api_base || '');
+        results.replaceChildren();
+        const groups = modelStore.groupResults(found || [], model.value);
+        for (const value of [...groups.matched, ...groups.rest]) {
+          const option = document.createElement('div'); option.className = 'model-search-item';
+          option.textContent = value; option.tabIndex = 0;
+          const select = () => { model.value = value; entry.name = value; results.hidden = true; save(status); model.focus(); };
+          option.addEventListener('click', select);
+          option.addEventListener('keydown', event => { if (event.key === 'Enter') select(); });
+          results.append(option);
+        }
+        if (!found?.length) {
+          const empty = document.createElement('div'); empty.className = 'model-search-item disabled';
+          empty.textContent = 'No models found'; results.append(empty);
+        }
+        results.hidden = false;
+      } catch { status.textContent = 'Model search unavailable'; }
+      finally { search.disabled = false; }
+    }
+    model.addEventListener('click', browse);
+    model.addEventListener('keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); browse(); }
+      if (event.key === 'Escape') results.hidden = true;
+    });
+    search.addEventListener('click', browse);
+    document.addEventListener('click', event => { if (!control.contains(event.target)) results.hidden = true; });
+    control.append(model, search, results); return control;
+  }
+
   async function mount(section) {
     if (section.querySelector(':scope > .auxiliary-roles-inline')) return;
     const title = (section.querySelector(':scope > .section-title') ||
@@ -74,53 +128,44 @@
         switchLabel.append(toggle, indicator);
         group.append(field(`${label} model`, description, switchLabel));
         const details = document.createElement('div'); group.append(details); root.append(group);
-        async function render() {
+        function render() {
           details.replaceChildren(); details.hidden = !toggle.checked;
           if (!toggle.checked) return;
           const provider = document.createElement('select');
           const empty = document.createElement('option'); empty.value = ''; empty.textContent = '— select —'; provider.append(empty);
-          const store = globalThis.Alpine?.store?.('modelConfig');
-          try { await store?.ensureLoaded?.(); } catch {}
-          for (const item of store?.chatProviders || []) {
+          for (const item of modelStore?.chatProviders || []) {
             const option = document.createElement('option'); option.value = item.value; option.textContent = item.label; provider.append(option);
           }
           provider.value = entry.provider || '';
-          provider.addEventListener('change', () => { entry.provider = provider.value; save(status); });
+          provider.addEventListener('change', () => {
+            entry.provider = provider.value; entry.name = ''; entry.api_base = '';
+            render(); save(status);
+          });
           details.append(field('Provider', `LLM provider for the ${label} specialist.`, provider));
-          const model = input(entry.name, value => { entry.name = value; save(status); });
-          const search = document.createElement('button'); search.type = 'button'; search.textContent = 'Search';
-          search.setAttribute('aria-label', `Search ${label} models`);
-          const choices = document.createElement('select'); choices.hidden = true;
-          search.addEventListener('click', async () => {
-            search.disabled = true;
-            try {
-              const found = await store?.searchModels?.(entry.provider, model.value, 'chat', entry.api_base || '');
-              choices.replaceChildren();
-              for (const value of found || []) {
-                const option = document.createElement('option'); option.value = value; option.textContent = value; choices.append(option);
-              }
-              choices.hidden = !choices.options.length;
-              if (!choices.options.length) status.textContent = 'No models found';
-            } catch { status.textContent = 'Model search unavailable'; }
-            finally { search.disabled = false; }
+          details.append(field('Model name', 'Model identifier. Click the field or search icon to browse available models.',
+            modelInput(entry, provider, status)));
+          const key = document.createElement('input'); key.type = 'password'; key.autocomplete = 'off';
+          key.placeholder = '••••••••••••'; key.style.paddingRight = '32px'; key.style.width = '100%';
+          const reveal = iconButton('visibility_off', 'Show API key');
+          reveal.addEventListener('click', () => {
+            const visible = key.type === 'password'; key.type = visible ? 'text' : 'password';
+            reveal.title = visible ? 'Hide API key' : 'Show API key'; reveal.setAttribute('aria-label', reveal.title);
+            reveal.firstElementChild?.setAttribute('name', visible ? 'visibility' : 'visibility_off');
           });
-          choices.addEventListener('change', () => { model.value = choices.value; entry.name = choices.value; save(status); });
-          const modelControl = document.createElement('div'); modelControl.append(model, search, choices);
-          details.append(field('Model name', 'Exact model identifier. Search models from the selected provider.', modelControl));
-          details.append(field('API base URL', 'Custom endpoint; leave empty for provider default.',
-            input(entry.api_base, value => { entry.api_base = value; save(status); }, 'url')));
-          const key = document.createElement('input'); key.type = 'password'; key.autocomplete = 'new-password';
-          key.placeholder = 'Leave blank to keep existing key';
-          const keyButton = document.createElement('button'); keyButton.type = 'button'; keyButton.textContent = 'Save key';
-          keyButton.addEventListener('click', async () => {
+          key.addEventListener('change', async () => {
             if (!entry.provider || !key.value) return;
+            const value = key.value; key.disabled = true;
             try {
-              const result = await api('/plugins/_model_config/api_keys', { action: 'set', keys: { [entry.provider]: key.value } });
-              status.textContent = result.ok ? 'Key saved' : 'Key not saved'; key.value = '';
-            } catch { status.textContent = 'Key not saved'; }
+              const result = await api('/plugins/_model_config/api_keys', { action: 'set', keys: { [entry.provider]: value } });
+              status.textContent = result.ok ? 'API key saved' : 'API key not saved';
+              if (result.ok) key.value = '';
+            } catch { status.textContent = 'API key not saved'; }
+            finally { key.disabled = false; }
           });
-          const keyControl = document.createElement('div'); keyControl.append(key, keyButton);
-          details.append(field('API key', 'Uses Agent Zero provider credential storage.', keyControl));
+          const keyControl = document.createElement('div'); keyControl.style.position = 'relative'; keyControl.style.width = '100%'; keyControl.append(key, reveal);
+          details.append(field('API key', 'Authentication key for this provider.', keyControl));
+          details.append(field('API base URL', 'Custom endpoint URL. Leave empty to use the provider default.',
+            input(entry.api_base, value => { entry.api_base = value; save(status); })));
         }
         toggle.addEventListener('change', () => { entry.enabled = toggle.checked; render(); save(status); });
         render();
