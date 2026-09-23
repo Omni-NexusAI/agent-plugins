@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`plugins/` contains Agent Zero-compatible plugin packages. Each child plugin folder should be understandable and maintainable on its own.
+`plugins/` contains Agent Zero-style plugin packages and one retained historical Agentspine snapshot. Each child plugin folder should be understandable and maintainable on its own. Future cross-framework sources belong under `portable/` until assembled for a host.
 
 ## Ownership
 
@@ -16,6 +16,8 @@
 
 - Read this file and the target plugin's `AGENTS.md` before editing a plugin.
 - Keep each plugin self-contained enough to sync into an individual repository.
+- Keep the root catalog's compatibility, development status, and distribution destination aligned with package evidence. A package without a verified destination is not automatically releasable.
+- Keep `_enhanced_mcp_config` historical and excluded from release selection.
 - Keep runtime patches idempotent and safe on unsupported hosts.
 - Do not rename underscore-prefixed Agentspine plugin folders unless imports, manifests, docs, and deployment paths are updated together.
 - Document compatibility gaps instead of silently relying on one local runtime.
@@ -45,3 +47,4 @@
 - `_multi_source_updater/AGENTS.md`: plugin-local source-aware self-update
   selection, persistence, and compatibility UI; it must not copy host files.
 - `provider_profiles/AGENTS.md`: portable provider-aware model, API base, and context-length restore behavior mirroring the GPU-pre container's `_model_config`.
+- `ai_link_bridge/AGENTS.md`: development scaffold and AI Link task-dispatch capability boundary.
