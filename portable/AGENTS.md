@@ -2,8 +2,8 @@
 
 ## Purpose
 
-`portable/` owns source for future plugins shared across agent frameworks.
-Convo and System 1 are planned; this phase creates no placeholder plugins.
+`portable/` owns source intended to be shared across agent frameworks.
+System 1 has a portable core and an Agent Zero adapter. Convo remains planned.
 
 ## Local Contracts
 
@@ -20,3 +20,7 @@ Convo and System 1 are planned; this phase creates no placeholder plugins.
 
 - For each future adapter, test its assembled output outside this checkout.
 - Keep the repository catalog, README, and adapter documentation aligned.
+
+## Child DOX Index
+
+- `system_1/AGENTS.md`: finite-choice backends, Agent Zero adapter, and independent assembly.

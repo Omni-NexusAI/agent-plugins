@@ -48,3 +48,4 @@
   selection, persistence, and compatibility UI; it must not copy host files.
 - `provider_profiles/AGENTS.md`: portable provider-aware model, API base, and context-length restore behavior mirroring the GPU-pre container's `_model_config`.
 - `ai_link_bridge/AGENTS.md`: development scaffold and AI Link task-dispatch capability boundary.
+- `system_1/AGENTS.md`: assembled System 1 Agent Zero package. Edit portable sources and regenerate; no direct package edits.

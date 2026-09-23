@@ -1,0 +1,18 @@
+from helpers.extension import Extension
+from usr.plugins.system_1.helpers.runtime import memory_decision, utility_decision
+
+
+class SystemOneUtility(Extension):
+    async def execute(self, call_data: dict, **kwargs):
+        if self.agent:
+            system = call_data.get("system", "")
+            if isinstance(system, str):
+                if "previous memories are stored" in system:
+                    purpose = "retrieval query preparation"
+                elif "notes about information worth memorizing" in system:
+                    purpose = "memory ingestion"
+                else:
+                    purpose = ""
+                if purpose and await memory_decision(self.agent, call_data.get("message", ""), purpose) == "precise":
+                    call_data["system"] += "\nSystem 1 guidance: keep only facts directly relevant to this task and retain the original meaning."
+            await utility_decision(self.agent, call_data)

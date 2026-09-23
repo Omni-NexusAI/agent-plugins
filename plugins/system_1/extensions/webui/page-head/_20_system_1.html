@@ -1,0 +1,159 @@
+<script>
+(() => {
+  const name = 'system_1';
+  const definitions = {
+    'Main Model': ['main', 'When enabled, a fast decision model routes requests and can initiate eligible tool and computer-use actions. Complex or uncertain work goes to the main model.'],
+    'Utility Model': ['utility', 'When enabled, a fast decision model handles eligible utility decisions, such as prompt preparation and memory organization. Complex or uncertain work goes to the utility model.'],
+    'Embedding Model': ['embedding', 'When enabled, a fast decision model guides memory ingestion and retrieval. Your selected embedding model still creates vectors for memory search.']
+  };
+  let settings;
+  let loading;
+  let timer;
+
+  async function api(path, body) {
+    const { fetchApi } = await import('/js/api.js');
+    const response = await fetchApi(path, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!response.ok) throw new Error('Request failed');
+    return response.json();
+  }
+
+  async function load() {
+    if (!loading) loading = api('/plugins', { action: 'get_config', plugin_name: name })
+      .then(result => { settings = result.data || {}; return settings; });
+    return loading;
+  }
+
+  function field(title, description, control) {
+    const row = document.createElement('div');
+    row.className = 'field';
+    const label = document.createElement('div');
+    label.className = 'field-label';
+    const heading = document.createElement('div');
+    heading.className = 'field-title';
+    heading.textContent = title;
+    const detail = document.createElement('div');
+    detail.className = 'field-description';
+    detail.textContent = description;
+    label.append(heading, detail);
+    const holder = document.createElement('div');
+    holder.className = 'field-control';
+    holder.append(control);
+    row.append(label, holder);
+    return row;
+  }
+
+  function saveLater(status) {
+    clearTimeout(timer);
+    status.textContent = 'Unsaved changes';
+    timer = setTimeout(async () => {
+      try {
+        const result = await api('/plugins', { action: 'save_config', plugin_name: name, settings });
+        status.textContent = result.ok ? 'Saved' : 'Unable to save';
+      } catch { status.textContent = 'Unable to save'; }
+    }, 350);
+  }
+
+  function textInput(value, onChange, type = 'text') {
+    const input = document.createElement('input');
+    input.type = type;
+    input.value = value || '';
+    input.addEventListener('change', () => onChange(input.value));
+    return input;
+  }
+
+  async function mount(section) {
+    if (section.querySelector(':scope > .system-one-inline')) return;
+    const title = (section.querySelector(':scope > .section-title') ||
+      section.querySelector(':scope > .preset-model-heading > .section-title'))?.textContent?.trim();
+    const definition = definitions[title];
+    if (!definition) return;
+    const [key, description] = definition;
+    const root = document.createElement('div');
+    root.className = 'system-one-inline';
+    root.setAttribute('aria-busy', 'true');
+    const status = document.createElement('div');
+    status.className = 'field-description';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    status.textContent = 'Loading System 1 settings…';
+    root.append(status);
+    section.append(root);
+    try {
+      await load();
+      if (!root.isConnected) return;
+      const entry = settings[key] || (settings[key] = {});
+      root.replaceChildren();
+      const toggle = document.createElement('input');
+      toggle.type = 'checkbox';
+      toggle.checked = !!entry.enabled;
+      toggle.setAttribute('aria-label', `${title} System One Mode`);
+      const switchLabel = document.createElement('label');
+      switchLabel.className = 'toggle';
+      const indicator = document.createElement('span');
+      indicator.className = 'toggler';
+      switchLabel.append(toggle, indicator);
+      root.append(field('System One Mode', description, switchLabel));
+      const details = document.createElement('div');
+      root.append(details);
+      const provider = document.createElement('select');
+      [['jev', 'Jev (hosted)'], ['llama_decision', 'llama.cpp decision endpoint']].forEach(([id, label]) => {
+        const option = document.createElement('option');
+        option.value = id; option.textContent = label; provider.append(option);
+      });
+      provider.value = entry.backend || 'jev';
+      provider.addEventListener('change', () => {
+        entry.backend = provider.value;
+        entry.endpoint = provider.value === 'jev' ? 'https://api.typesafe.ai/v1/systemone' : '';
+        entry.model = provider.value === 'jev' ? 'jev-latest' : '';
+        renderDetails(); saveLater(status);
+      });
+      function renderDetails() {
+        details.replaceChildren();
+        details.hidden = !toggle.checked;
+        if (!toggle.checked) return;
+        details.append(field('Provider', 'Decision service for this model section.', provider));
+        details.append(field('Model name', 'Exact model identifier served by the selected provider.',
+          textInput(entry.model, value => { entry.model = value; saveLater(status); })));
+        details.append(field('Endpoint', 'URL for the configured decision service.',
+          textInput(entry.endpoint, value => { entry.endpoint = value; saveLater(status); }, 'url')));
+        details.append(field('Credential environment variable', 'The key remains in Agent Zero environment settings.',
+          textInput(entry.token_env, value => { entry.token_env = value; saveLater(status); })));
+        const credential = document.createElement('input');
+        credential.type = 'password'; credential.autocomplete = 'new-password';
+        credential.placeholder = 'Leave blank to keep existing key';
+        const keyStatus = document.createElement('span');
+        keyStatus.className = 'field-description';
+        const saveKey = document.createElement('button');
+        saveKey.type = 'button'; saveKey.textContent = 'Save key';
+        saveKey.addEventListener('click', async () => {
+          try {
+            const result = await api('/plugins/system_1/credential', { action: 'set', name: entry.token_env, value: credential.value });
+            keyStatus.textContent = result.ok ? 'Key saved' : 'Key not saved';
+            credential.value = '';
+          } catch { keyStatus.textContent = 'Key not saved'; }
+        });
+        const control = document.createElement('div');
+        control.append(credential, saveKey, keyStatus);
+        details.append(field('API key', 'Stored in Agent Zero environment settings; never shown after saving.', control));
+      }
+      toggle.addEventListener('change', () => { entry.enabled = toggle.checked; renderDetails(); saveLater(status); });
+      renderDetails();
+      status.textContent = '';
+      root.append(status);
+      root.removeAttribute('aria-busy');
+    } catch {
+      status.textContent = 'System 1 settings unavailable';
+      root.removeAttribute('aria-busy');
+    }
+  }
+
+  function scan() { document.querySelectorAll('.model-section, .preset-model-section').forEach(mount); }
+  document.addEventListener('DOMContentLoaded', scan, { once: true });
+  document.addEventListener('alpine:init', () => setTimeout(scan, 0));
+  new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true });
+  scan();
+})();
+</script>

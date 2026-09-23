@@ -30,7 +30,7 @@ been verified.
 | [`_enhanced_speech`](plugins/_enhanced_speech/) | Agent Zero, Agentspine | Active; voice compatibility changes are under review |
 | [`ai_link_bridge`](plugins/ai_link_bridge/) | Agent Zero, Agentspine target | Development scaffold; task dispatch is not implemented |
 | Convo | Multiple frameworks planned | Planned; no package yet |
-| System 1 | Multiple frameworks planned, starting with Agent Zero | Planned; no package yet |
+| [`System 1`](plugins/system_1/) | Portable core; Agent Zero adapter first | Development; Agent Zero package assembled from [`portable/system_1/`](portable/system_1/) |
 
 The existing packages listed for both frameworks use Agent Zero-style packaging;
 they do not yet use the planned shared `portable/` core and adapters. A planned
@@ -51,9 +51,9 @@ part of this monorepo.
   distribution must include the shared code it needs. The monorepo is never a
   runtime dependency of an installed package.
 
-Convo and System 1 are planned portable plugins. The auxiliary model-role
-extension is planned as an Agent Zero package. This repository foundation does
-not contain their implementations.
+Convo remains planned. System 1 now has portable decision sources and an
+assembled Agent Zero development package. The auxiliary model-role extension
+is being developed separately.
 
 ## Standalone repository sync
 

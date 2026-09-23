@@ -1,0 +1,9 @@
+name: system_1
+title: System 1
+description: Fast finite-choice routing, eligible host actions, and bounded event decisions with escalation to Agent Zero's models.
+version: 0.1.0
+settings_sections:
+  - agent
+  - plugins
+per_project_config: true
+per_agent_config: true

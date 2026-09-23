@@ -1,0 +1,54 @@
+<html>
+<head><title>System 1</title></head>
+<body>
+  <div x-data="{ status: 'Not checked', busy: false,
+    async check() {
+      this.busy = true;
+      try {
+        const { fetchApi } = await import('/js/api.js');
+        const response = await fetchApi('/plugins/system_1/status', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ section: 'main', check: true })
+        });
+        const result = await response.json();
+        this.status = result.status || 'Unavailable';
+      } catch { this.status = 'Unavailable'; }
+      finally { this.busy = false; }
+    } }">
+    <div class="section-title">System 1</div>
+    <div class="section-description">Finite-choice decisions use the selected backend. Agent Zero still validates and executes actions.</div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Main backend status</div><div class="field-description">Checks the configured decision service on request.</div></div>
+      <div class="field-control"><button type="button" @click="check()" :disabled="busy">Check connection</button><span role="status" aria-live="polite" x-text="busy ? 'Checking…' : status"></span></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Action eligibility</div><div class="field-description">Exact tool names and arguments that System 1 may select. Other actions escalate to Main.</div></div>
+      <div class="field-control"><textarea x-model="config.policy._actions_json" @blur="try { config.policy.actions = JSON.parse(config.policy._actions_json || '{}'); $el.setCustomValidity(''); } catch { $el.setCustomValidity('Enter a JSON object of fixed actions'); $el.reportValidity(); }" x-init="config.policy._actions_json = JSON.stringify(config.policy.actions || {}, null, 2)" spellcheck="false"></textarea></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Minimum choice probability</div><div class="field-description">Lower confidence escalates to the normal model.</div></div>
+      <div class="field-control"><input type="number" min="0" max="1" step="0.01" x-model.number="config.policy.min_choice_probability" /></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Backend timeout, seconds</div><div class="field-description">Decision failures use the normal model.</div></div>
+      <div class="field-control"><input type="number" min="0.1" max="30" step="0.1" x-model.number="config.policy.timeout_seconds" /></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Monitoring interval, seconds</div><div class="field-description">Minimum time between bounded event checks.</div></div>
+      <div class="field-control"><input type="number" min="0.1" max="10" step="0.1" x-model.number="config.policy.monitor_interval_seconds" /></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Monitoring check limit</div><div class="field-description">Maximum decisions per task while Main works.</div></div>
+      <div class="field-control"><input type="number" min="1" max="100" x-model.number="config.policy.monitor_max_checks" /></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Monitoring duration, seconds</div><div class="field-description">Stops the decision lane after this duration.</div></div>
+      <div class="field-control"><input type="number" min="1" max="300" x-model.number="config.policy.monitor_max_seconds" /></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Action precedence</div><div class="field-description">When an auxiliary Tool model is enabled, choose which role evaluates a task first.</div></div>
+      <div class="field-control"><select x-model="config.policy.action_precedence"><option value="main_first">Main System 1 first</option><option value="tool_first">Tool model first</option></select></div>
+    </div>
+  </div>
+</body>
+</html>
