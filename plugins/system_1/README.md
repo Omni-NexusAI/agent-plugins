@@ -13,7 +13,8 @@ Main, Utility, or Embedding. Decider holds the provider, model name, endpoint,
 credential, and context window for all enabled modes. The toggles decide where
 Agent Zero uses that shared decision service. Decider settings save through the
 plugin and apply across model presets; they do not change the selected Main,
-Utility, or Embedding model.
+Utility, or Embedding models. The model preset overview shows the configured
+Decider beside those three model identities, even though its connection is global.
 When Main mode is enabled, each eligible decision appears as an expandable **S1**
 step in the chat process timeline. It shows whether System 1 selected an
 eligible action, delegated to a specialist, or handed off to Main, plus backend,

@@ -34,7 +34,11 @@ the decision hook. Logging failures must not change model routing.
 The model editor keeps the three System One Mode toggles in their native model
 sections and injects a shared Decider Model section beside them. It uses native
 field and search styles, but saves Decider through plugin config because the
-host preset serializer owns only native model slots. The get hook supplies a
+host preset serializer owns only native model slots. The plugin adds a
+read-only Decider identity row in the native preset overview, using the same
+row styles as Main, Utility, and Embedding. It must reflect the global shared
+connection across preset changes, tolerate missing settings/store, and avoid
+adding Decider to the host preset serializer. The get hook supplies a
 read-time migration for matching legacy connections. A conflict among enabled
 legacy connections requires the user to select one in the Decider editor; do
 not silently choose. Preserve legacy values and unrelated plugin keys. Once a

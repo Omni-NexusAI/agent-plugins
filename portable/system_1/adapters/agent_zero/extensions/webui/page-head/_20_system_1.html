@@ -71,6 +71,7 @@
   function saveLater(status) {
     clearTimeout(timer);
     status.textContent = 'Unsaved changes';
+    document.querySelectorAll('.model-preset-rows').forEach(mountSummary);
     timer = setTimeout(async () => {
       try {
         const result = await api('/plugins', { action: 'save_config', plugin_name: name, settings });
@@ -297,9 +298,58 @@
     }
   }
 
+  function providerTitle(entry) {
+    const provider = entry?.provider || entry?.backend || '';
+    if (provider === 'jev') return 'Jev';
+    if (provider === 'llama_decision') return 'llama.cpp';
+    return modelStore?.chatProviders?.find(item => item.value === provider)?.label || provider;
+  }
+
+  async function mountSummary(rows) {
+    if (!settings) {
+      if (rows.dataset.systemOneSummaryLoading) return;
+      rows.dataset.systemOneSummaryLoading = '1';
+      try { await load(); }
+      catch { return; }
+      finally { delete rows.dataset.systemOneSummaryLoading; }
+      if (!rows.isConnected) return;
+    }
+    let row = rows.querySelector(':scope > .system-one-summary-row');
+    if (!row) {
+      row = document.createElement('div');
+      row.className = 'model-preset-row system-one-summary-row';
+      const icon = document.createElement('x-icon');
+      icon.className = 'model-preset-icon'; icon.setAttribute('name', 'psychology');
+      const role = document.createElement('span');
+      role.className = 'model-preset-role'; role.textContent = 'Decider';
+      const identity = document.createElement('span');
+      identity.className = 'model-preset-identity';
+      row.append(icon, role, identity);
+      rows.append(row);
+    }
+    const entry = settings?.decider;
+    const provider = providerTitle(entry);
+    const model = entry?.model || '';
+    const identity = row.querySelector('.model-preset-identity');
+    const expected = provider && model ? `${provider} / ${model}` : 'Configure in Edit Presets';
+    if (identity.textContent !== expected) {
+      identity.replaceChildren();
+      if (provider && model) {
+        const name = document.createElement('span');
+        name.className = 'model-preset-provider'; name.textContent = provider;
+        const separator = document.createElement('span');
+        separator.className = 'model-preset-separator'; separator.textContent = ' / ';
+        identity.append(name, separator, document.createTextNode(model));
+      } else {
+        identity.textContent = expected;
+      }
+    }
+  }
+
   function scan() {
     document.querySelectorAll('.model-section, .preset-model-section').forEach(mount);
     document.querySelectorAll('.preset-editor-body').forEach(mountDecider);
+    document.querySelectorAll('.model-preset-rows').forEach(mountSummary);
   }
   document.addEventListener('DOMContentLoaded', scan, { once: true });
   document.addEventListener('alpine:init', () => setTimeout(scan, 0));
