@@ -18,6 +18,11 @@
 - Keep memory and monitoring work bounded. No background task may mutate agent state directly.
 - On the current Agent Zero host, the first model turn is loop iteration zero;
   fast actions may run there once, then later iterations belong to the host.
+- The Agent Zero adapter records a single native Info step with a `system1-main-`
+  ID for an enabled
+  Main decision, before the native GEN step. It updates the same record with
+  route, backend, confidence when available, and elapsed time. Never put
+  request text, tool arguments, or credentials in the timeline record.
 
 ## Verification
 

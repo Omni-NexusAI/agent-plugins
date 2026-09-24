@@ -9,6 +9,13 @@ provide this decision endpoint.
 
 The plugin is disabled by default. In the Main, Utility, and Embedding model
 sections, enable **System One Mode** and select a backend, model, and endpoint.
+When Main mode is enabled, its first decision appears as an expandable **S1**
+step in the chat process timeline. It shows whether System 1 selected an
+eligible action, delegated to a specialist, or handed off to Main, plus backend,
+elapsed time, and confidence when available. Native Gen and Tool steps remain
+unchanged. For a selected action, S1 names the tool submitted to Agent Zero;
+the native Tool step shows its actual execution and result. The S1 detail
+intentionally omits request text and tool arguments.
 These first-iteration mode settings are global across model presets and agent
 profiles; each model category has its own toggle and backend selection.
 For hosted Jev, set the configured environment variable (default

@@ -8,6 +8,7 @@ import os
 from helpers import plugins
 from usr.plugins.system_1.helpers.system_1_core import DecisionClient, DecisionError
 from usr.plugins.system_1.helpers.system_1_core.decision import selected_action
+from usr.plugins.system_1.helpers.timeline import finish_main_step
 
 
 PLUGIN = "system_1"
@@ -107,10 +108,12 @@ async def main_decision(agent) -> str | None:
         return None
     settings = config_for(agent, "main")
     if not settings:
+        finish_main_step(agent, "Handed off to Main", detail="Mode disabled")
         return None
     section, policy = settings
     text = agent.last_user_message.output_text() if agent.last_user_message else ""
     if not text.strip():
+        finish_main_step(agent, "Handed off to Main", detail="No request text")
         return None
     actions = allowed_actions(policy)
     choices = {"main": "Use Main for complex, uncertain, or open-ended reasoning and actions."}
@@ -121,16 +124,19 @@ async def main_decision(agent) -> str | None:
     except ImportError:
         roles = {}
     if policy.get("action_precedence") == "tool_first" and "tool" in roles:
+        finish_main_step(agent, "Delegated to Tool", detail="Tool role has precedence")
         return delegation_action("tool", text)
     for role in roles:
         choices[f"specialist_{role}"] = f"Delegate a bounded {role} task to the configured specialist."
     if len(choices) < 2:
+        finish_main_step(agent, "Handed off to Main", detail="No eligible choices")
         return None
     try:
         client = client_for(section, policy)
         result = await client.choose(text[:int(policy.get("max_state_chars", 4000))], choices)
         latest = config_for(agent, "main")
         if not latest:
+            finish_main_step(agent, "Handed off to Main", detail="Mode disabled during decision")
             return None
         policy = latest[1]
         actions = allowed_actions(policy)
@@ -142,13 +148,22 @@ async def main_decision(agent) -> str | None:
             except ImportError:
                 current_roles = {}
             if role in current_roles:
+                finish_main_step(agent, f"Delegated to {role.title()}",
+                                 confidence=result.confidence)
                 return delegation_action(role, text)
         action = None if result.backend == "chat" else selected_action(
             result, actions, threshold=float(policy.get("min_choice_probability", 0.85)))
         if action:
+            finish_main_step(agent, "Selected eligible action",
+                             confidence=result.confidence,
+                             detail="Submitted to Agent Zero for normal execution",
+                             action_name=action["tool_name"])
             return json.dumps(action, separators=(",", ":"))
+        finish_main_step(agent, "Handed off to Main",
+                         confidence=result.confidence,
+                         detail="No eligible action met the policy")
     except (DecisionError, ValueError, TypeError, OSError):
-        pass
+        finish_main_step(agent, "Handed off to Main", detail="Decision unavailable")
     return None
 
 

@@ -27,10 +27,14 @@ class RoutingTests(unittest.TestCase):
         core.DecisionError = RuntimeError
         decision = types.ModuleType(core.__name__ + ".decision")
         decision.selected_action = lambda *args, **kwargs: None
+        timeline = types.ModuleType("usr.plugins.system_1.helpers.timeline")
+        self.timeline_events = []
+        timeline.finish_main_step = lambda *args, **kwargs: self.timeline_events.append((args, kwargs))
         auxiliary = types.ModuleType("usr.plugins.auxiliary_model_roles.helpers.runtime")
         auxiliary.available_roles = lambda agent: {"tool": {"enabled": True}}
         self.modules = patch.dict(sys.modules, {"helpers": helpers, core.__name__: core,
-                                                decision.__name__: decision, auxiliary.__name__: auxiliary})
+                                                decision.__name__: decision, timeline.__name__: timeline,
+                                                auxiliary.__name__: auxiliary})
         self.modules.start()
         spec = importlib.util.spec_from_file_location("system_one_runtime_test", SOURCE)
         self.runtime = importlib.util.module_from_spec(spec)
@@ -43,6 +47,7 @@ class RoutingTests(unittest.TestCase):
         result = asyncio.run(self.runtime.main_decision(Agent()))
         self.assertEqual(json.loads(result), {"tool_name": "auxiliary_delegate",
                                                "tool_args": {"role": "tool", "goal": "Inspect this page"}})
+        self.assertEqual(self.timeline_events[-1][0][1], "Delegated to Tool")
 
     def test_disabled_main_escalates(self):
         self.config["main"]["enabled"] = False
@@ -61,6 +66,19 @@ class RoutingTests(unittest.TestCase):
             return types.SimpleNamespace(choice="memory", confidence=0.99)
         self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
         self.assertIsNone(asyncio.run(self.runtime.main_decision(Agent())))
+        self.assertEqual(self.timeline_events[-1][1]["detail"], "Mode disabled during decision")
+
+    def test_eligible_action_names_host_tool_in_timeline(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        self.config["policy"]["actions"] = {
+            "recall": {"tool_name": "memory_load", "tool_args": {"query": "current project"}}}
+        async def decide(state, choices):
+            return types.SimpleNamespace(choice="recall", confidence=0.99, backend="jev")
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions["recall"]
+        result = asyncio.run(self.runtime.main_decision(Agent()))
+        self.assertEqual(json.loads(result)["tool_name"], "memory_load")
+        self.assertEqual(self.timeline_events[-1][1]["action_name"], "memory_load")
 
 
 if __name__ == "__main__":
