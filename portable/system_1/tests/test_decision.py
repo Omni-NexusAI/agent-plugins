@@ -57,6 +57,16 @@ class DecisionTests(unittest.TestCase):
             with self.assertRaises(module.DecisionError):
                 asyncio.run(client.choose("State", {"main": "Reason", "open": "Open"}))
 
+    def test_action_requires_host_valid_arguments_and_copies_nested_values(self):
+        decision = module.Decision("open", 0.99, "jev")
+        self.assertIsNone(module.selected_action(decision, {
+            "open": {"tool_name": "known_tool", "tool_args": {}}}, threshold=0.9))
+        args = {"options": {"target": "dashboard"}}
+        selected = module.selected_action(decision, {
+            "open": {"tool_name": "known_tool", "tool_args": args}}, threshold=0.9)
+        args["options"]["target"] = "changed"
+        self.assertEqual(selected["tool_args"]["options"]["target"], "dashboard")
+
 
 if __name__ == "__main__":
     unittest.main()

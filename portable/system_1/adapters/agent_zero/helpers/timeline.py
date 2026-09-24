@@ -1,4 +1,4 @@
-"""Small, non-authoritative chat timeline record for Main System 1 decisions."""
+"""Small, non-authoritative chat timeline records for Main System 1 decisions."""
 
 from __future__ import annotations
 
@@ -18,10 +18,14 @@ def _temporary(agent):
 
 
 def start_main_step(agent) -> None:
-    """Create one native process step before Main's ordinary GEN placeholder."""
+    """Create a native process step before each eligible System 1 decision."""
     try:
         params = _temporary(agent)
-        if params is None or KEY in params or getattr(agent.loop_data, "iteration", -1) != 0:
+        if params is None or KEY in params:
+            return
+        from usr.plugins.system_1.helpers.runtime import should_decide
+
+        if not should_decide(agent):
             return
         config = plugins.get_plugin_config("system_1", agent)
         main = config.get("main", {}) if isinstance(config, dict) else {}

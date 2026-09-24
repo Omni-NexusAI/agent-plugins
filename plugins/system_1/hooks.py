@@ -9,12 +9,15 @@ def save_plugin_config(result=None, settings=None, **kwargs):
         policy.pop("_actions_json", None)
         actions = policy.get("actions", {})
         if not isinstance(actions, dict) or any(
-            not isinstance(key, str) or key == "main" or key.startswith("specialist_") or not isinstance(value, dict)
+            not isinstance(key, str) or key in {"main", "finish"} or key.startswith("specialist_") or not isinstance(value, dict)
             or not isinstance(value.get("tool_name"), str)
-            or not isinstance(value.get("tool_args", {}), dict)
+            or not isinstance(value.get("tool_args"), dict) or not value["tool_args"]
+            or not isinstance(value.get("description", key), str)
+            or any(not isinstance(value.get(flag, False), bool)
+                   for flag in ("share_result_with_backend", "return_result_to_user"))
             for key, value in actions.items()
         ):
-            raise ValueError("System 1 actions require fixed tool names and argument objects")
+            raise ValueError("System 1 actions require fixed tool names, nonempty arguments, and boolean result permissions")
         probability = float(policy.get("min_choice_probability", 0.85))
         if not 0 <= probability <= 1:
             raise ValueError("System 1 probability threshold must be between 0 and 1")
@@ -22,4 +25,10 @@ def save_plugin_config(result=None, settings=None, **kwargs):
             raise ValueError("Unknown System 1 action precedence")
         if policy.get("preset", "balanced") not in {"fast", "balanced", "conservative"}:
             raise ValueError("Unknown System 1 preset")
+        action_limit = int(policy.get("max_actions_per_turn", 3))
+        if not 1 <= action_limit <= 8:
+            raise ValueError("System 1 actions per turn must be between 1 and 8")
+        result_limit = int(policy.get("max_result_chars", 2000))
+        if not 1 <= result_limit <= 4000:
+            raise ValueError("System 1 observed result limit must be between 1 and 4000")
     return settings

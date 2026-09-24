@@ -6,8 +6,17 @@ portable core. Do not edit the assembled package directly. Run `assemble.py`
 and compare its output. The host retains execution authority, embedding vectors,
 and intervention handling.
 
-The Main timeline uses `before_main_llm_call` to create one native Info step;
-`helpers/timeline.py` updates it after routing. A guarded
+The Main timeline uses `before_main_llm_call` to create one native Info step
+per eligible System 1 decision; `helpers/timeline.py` updates it after routing.
+The `hist_add_tool_result` extension observes only a pending System 1 action's
+host-recorded result, masks it with the host secrets manager, then the next
+model iteration may make a bounded choice. It fails closed if masking fails.
+The result observer must never alter host history or block tool completion.
+The action loop uses per-monologue state, an action count cap, and no replay of
+action IDs. It withholds result content from the decision service unless the
+action explicitly opts in, and returns observed content directly to the user
+only with a separate action opt-in. Recheck both permissions and the exact
+action definition immediately before the next decision. A guarded
 `set_messages_after_loop` WebUI extension recognizes its `system1-main-` ID
 and marks only that record with an S1
 badge and accent. It must tolerate virtualized entries with no DOM element and

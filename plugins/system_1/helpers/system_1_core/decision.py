@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from dataclasses import dataclass
 import json
 import math
@@ -105,6 +106,13 @@ def selected_action(decision: Decision, actions: Mapping[str, dict], *, threshol
     if not isinstance(action, dict) or not isinstance(action.get("tool_name"), str):
         return None
     arguments = action.get("tool_args", {})
-    if not isinstance(arguments, dict) or not action["tool_name"]:
+    if not isinstance(arguments, dict) or not arguments or not action["tool_name"].strip():
         return None
-    return {"tool_name": action["tool_name"], "tool_args": arguments.copy()}
+    # Agent Zero rejects empty tool_args. Reject payloads that cannot be
+    # serialized before they reach its tool validation boundary.
+    try:
+        if len(json.dumps(arguments)) > 16_000:
+            return None
+    except (TypeError, ValueError):
+        return None
+    return {"tool_name": action["tool_name"], "tool_args": deepcopy(arguments)}

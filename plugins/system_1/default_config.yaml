@@ -21,6 +21,8 @@ policy:
   min_choice_probability: 0.85
   timeout_seconds: 2.0
   max_state_chars: 4000
+  max_actions_per_turn: 3
+  max_result_chars: 2000
   monitor_interval_seconds: 0.5
   monitor_max_checks: 20
   monitor_max_seconds: 30

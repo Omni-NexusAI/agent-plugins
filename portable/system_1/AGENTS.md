@@ -9,18 +9,27 @@
 ## Contracts
 
 - The assembled package must run without this source tree.
-- Only the host may execute actions. Decisions select predeclared actions with exact arguments.
+- Only the host may execute actions. Decisions select predeclared actions with exact,
+  nonempty arguments. A second System 1 decision is eligible only after the host
+  records the selected tool's result in the same monologue. Per-turn state must
+  reset on a new monologue, cap actions, and avoid replaying a used action ID.
+- Tool results are not sent to a decision backend by default. An action must
+  explicitly opt into bounded result sharing. Returning the observed result
+  directly to the user is a separate explicit per-action opt-in; otherwise
+  open-ended output goes to Main. Mask tool results with the host secrets
+  manager before retaining them, fail closed if masking fails, and recheck the
+  action definition and sharing flags before any subsequent backend call.
 - A backend failure escalates to the existing model and never switches providers silently.
 - OpenRouter Jev uses the Decisions API and its shared Agent Zero provider key.
   Native chat providers may route, but their self-reported confidence never
   authorizes direct fixed action dispatch.
 - Embedding vectors remain the host embedding model's output.
 - Keep memory and monitoring work bounded. No background task may mutate agent state directly.
-- On the current Agent Zero host, the first model turn is loop iteration zero;
-  fast actions may run there once, then later iterations belong to the host.
-- The Agent Zero adapter records a single native Info step with a `system1-main-`
-  ID for an enabled
-  Main decision, before the native GEN step. It updates the same record with
+- On Agent Zero, the first model turn is loop iteration zero. A later
+  iteration can make another System 1 decision only after an observed result
+  from its pending tool, within the action cap; other iterations belong to Main.
+- The Agent Zero adapter records a native Info step with a `system1-main-`
+  ID for each eligible Main decision, before the native GEN step. It updates each record with
   route, backend, confidence when available, and elapsed time. Never put
   request text, tool arguments, or credentials in the timeline record.
 

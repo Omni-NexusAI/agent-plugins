@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import os
 
@@ -12,6 +13,79 @@ from usr.plugins.system_1.helpers.timeline import finish_main_step
 
 
 PLUGIN = "system_1"
+_TURN_STATE = "_system_1_action_turn"
+_MAX_ACTIONS = 8
+_MAX_RESULT_CHARS = 4000
+
+
+def _bounded_int(value, default: int, minimum: int, maximum: int) -> int:
+    try:
+        return max(minimum, min(maximum, int(value)))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _turn_state(agent, *, create: bool = False) -> dict | None:
+    """Keep action state with this monologue, never with a later user turn."""
+    loop_data = getattr(agent, "loop_data", None)
+    if loop_data is None:
+        return None
+    state = getattr(agent, _TURN_STATE, None)
+    user_message = getattr(agent, "last_user_message", None)
+    if (isinstance(state, dict) and state.get("loop_data") is loop_data and
+            state.get("user_message") is user_message):
+        return state
+    if not create:
+        return None
+    state = {"loop_data": loop_data, "user_message": user_message,
+             "attempted_iteration": -1,
+             "actions_submitted": 0, "used_action_ids": set(),
+             "pending": None, "observation": None, "complete": False}
+    setattr(agent, _TURN_STATE, state)
+    return state
+
+
+def should_decide(agent) -> bool:
+    """Whether this iteration has a first request or a real host result to assess."""
+    iteration = getattr(getattr(agent, "loop_data", None), "iteration", -1)
+    if not isinstance(iteration, int) or iteration < 0:
+        return False
+    raw_state = getattr(agent, _TURN_STATE, None)
+    if (isinstance(raw_state, dict) and
+            raw_state.get("loop_data") is agent.loop_data and
+            raw_state.get("user_message") is not getattr(agent, "last_user_message", None)):
+        return False  # An intervention changed the request inside this monologue.
+    state = _turn_state(agent)
+    if iteration == 0:
+        return not state or (not state["complete"] and state["attempted_iteration"] != 0)
+    return bool(state and not state["complete"] and
+                state["attempted_iteration"] != iteration and
+                state["pending"] is None and state["observation"] is not None)
+
+
+def record_host_result(agent, tool_name: str, tool_result: str) -> bool:
+    """Accept only the host-recorded result of our pending action.
+
+    The host calls this after executing the native or MCP tool. The plugin
+    never executes a tool itself and never infers success from dispatch alone.
+    """
+    state = _turn_state(agent)
+    pending = state.get("pending") if state else None
+    if not pending or state["observation"] is not None:
+        return False
+    if tool_name != pending["tool_name"].split(":", 1)[0]:
+        return False
+    result = tool_result if isinstance(tool_result, str) else ""
+    limit = pending["result_limit"]
+    state["observation"] = {
+        "action_id": pending["action_id"], "tool_name": pending["tool_name"],
+        "action_definition": pending["action_definition"],
+        "result": result[:limit] if pending["share_result"] else "",
+        "return_result": result[:limit] if pending["return_result"] else "",
+        "truncated": len(result) > limit,
+    }
+    state["pending"] = None
+    return True
 
 
 def delegation_action(role: str, goal: str) -> str:
@@ -94,53 +168,100 @@ def allowed_actions(policy: dict) -> dict:
     if not isinstance(actions, dict):
         return {}
     return {key: value for key, value in actions.items()
-            if isinstance(key, str) and key and isinstance(value, dict)
+            if isinstance(key, str) and key not in {"", "main", "finish"}
+            and not key.startswith("specialist_") and isinstance(value, dict)
             and isinstance(value.get("tool_name"), str)
-            and isinstance(value.get("tool_args", {}), dict)}
+            and isinstance(value.get("tool_args"), dict) and value["tool_args"]
+            and isinstance(value.get("description", key), str)}
 
 
 async def main_decision(agent) -> str | None:
-    # A fixed action is eligible only once per user turn. Later iterations
-    # belong to the host's tool-result/reasoning loop.
-    # Agent Zero initializes LoopData.iteration to -1 and increments it to 0
-    # before the first model call. Later iterations belong to the host loop.
-    if getattr(getattr(agent, "loop_data", None), "iteration", -1) != 0:
+    # Called from the host's model-call interception point on each iteration.
+    # Only a first request or an observed result from our own tool can start a
+    # decision. A second interception on the same iteration is ignored.
+    if not should_decide(agent):
         return None
+    state = _turn_state(agent, create=True)
+    iteration = agent.loop_data.iteration
+    state["attempted_iteration"] = iteration
     settings = config_for(agent, "main")
     if not settings:
+        state["complete"] = True
         finish_main_step(agent, "Handed off to Main", detail="Mode disabled")
         return None
     section, policy = settings
     text = agent.last_user_message.output_text() if agent.last_user_message else ""
     if not text.strip():
+        state["complete"] = True
         finish_main_step(agent, "Handed off to Main", detail="No request text")
         return None
-    actions = allowed_actions(policy)
+    limit = _bounded_int(policy.get("max_actions_per_turn"), 3, 1, _MAX_ACTIONS)
+    observation = state["observation"]
+    if observation is not None:
+        state["observation"] = None
+        current_prior = allowed_actions(policy).get(observation["action_id"])
+        if current_prior != observation["action_definition"]:
+            observation["result"] = ""
+            observation["return_result"] = ""
+    actions = {key: value for key, value in allowed_actions(policy).items()
+               if key not in state["used_action_ids"]}
+    if state["actions_submitted"] >= limit:
+        actions = {}
     choices = {"main": "Use Main for complex, uncertain, or open-ended reasoning and actions."}
-    choices.update({key: value.get("description", key) for key, value in actions.items() if key != "main"})
-    try:
-        from usr.plugins.auxiliary_model_roles.helpers.runtime import available_roles
-        roles = available_roles(agent)
-    except ImportError:
-        roles = {}
-    if policy.get("action_precedence") == "tool_first" and "tool" in roles:
-        finish_main_step(agent, "Delegated to Tool", detail="Tool role has precedence")
-        return delegation_action("tool", text)
-    for role in roles:
-        choices[f"specialist_{role}"] = f"Delegate a bounded {role} task to the configured specialist."
+    choices.update({key: value.get("description", key) for key, value in actions.items()})
+    if observation is not None and observation["return_result"] and not observation["truncated"]:
+        choices["finish"] = "Return the observed tool result to the user without further elaboration."
+    offered_actions = deepcopy(actions)
+    roles = {}
+    if iteration == 0:
+        try:
+            from usr.plugins.auxiliary_model_roles.helpers.runtime import available_roles
+            roles = available_roles(agent)
+        except ImportError:
+            pass
+        if policy.get("action_precedence") == "tool_first" and "tool" in roles:
+            state["complete"] = True
+            finish_main_step(agent, "Delegated to Tool", detail="Tool role has precedence")
+            return delegation_action("tool", text)
+        for role in roles:
+            choices[f"specialist_{role}"] = f"Delegate a bounded {role} task to the configured specialist."
     if len(choices) < 2:
+        state["complete"] = True
         finish_main_step(agent, "Handed off to Main", detail="No eligible choices")
         return None
     try:
         client = client_for(section, policy)
-        result = await client.choose(text[:int(policy.get("max_state_chars", 4000))], choices)
+        max_state = _bounded_int(policy.get("max_state_chars"), 4000, 256, 16_000)
+        decision_state = text
+        if observation is not None:
+            original = text[:max_state // 2]
+            decision_state = (f"Original request: {original}\n"
+                              f"Prior action: {observation['tool_name']}\n"
+                              f"Observed result: {observation['result'] or '[result content withheld by policy]'}")
+        result = await client.choose(decision_state[:max_state], choices)
+        if _turn_state(agent) is not state:
+            state["complete"] = True
+            finish_main_step(agent, "Handed off to Main", detail="Request changed during decision")
+            return None
         latest = config_for(agent, "main")
         if not latest:
+            state["complete"] = True
             finish_main_step(agent, "Handed off to Main", detail="Mode disabled during decision")
             return None
         policy = latest[1]
         actions = allowed_actions(policy)
-        if result.choice.startswith("specialist_") and result.confidence >= float(policy.get("min_choice_probability", 0.85)):
+        threshold = float(policy.get("min_choice_probability", 0.85))
+        if (result.backend != "chat" and result.choice == "finish" and
+                observation is not None and result.confidence >= threshold):
+            prior = actions.get(observation["action_id"], {})
+            if (observation["return_result"] and not observation["truncated"] and
+                    prior == observation["action_definition"] and
+                    prior.get("return_result_to_user") is True):
+                state["complete"] = True
+                finish_main_step(agent, "Finished from observed result", confidence=result.confidence)
+                return json.dumps({"tool_name": "response", "tool_args": {
+                    "text": observation["return_result"]}}, separators=(",", ":"))
+        if iteration == 0 and result.choice.startswith("specialist_") and result.confidence >= threshold:
             role = result.choice.removeprefix("specialist_")
             try:
                 from usr.plugins.auxiliary_model_roles.helpers.runtime import available_roles
@@ -148,21 +269,39 @@ async def main_decision(agent) -> str | None:
             except ImportError:
                 current_roles = {}
             if role in current_roles:
+                state["complete"] = True
                 finish_main_step(agent, f"Delegated to {role.title()}",
                                  confidence=result.confidence)
                 return delegation_action(role, text)
-        action = None if result.backend == "chat" else selected_action(
-            result, actions, threshold=float(policy.get("min_choice_probability", 0.85)))
+        current_limit = _bounded_int(policy.get("max_actions_per_turn"), 3, 1, _MAX_ACTIONS)
+        action = None
+        if (result.backend != "chat" and result.choice not in state["used_action_ids"]
+                and state["actions_submitted"] < current_limit
+                and result.choice in offered_actions
+                and actions.get(result.choice) == offered_actions[result.choice]):
+            action = selected_action(result, actions, threshold=threshold)
         if action:
+            selected = actions[result.choice]
+            state["actions_submitted"] += 1
+            state["used_action_ids"].add(result.choice)
+            state["pending"] = {
+                "action_id": result.choice, "tool_name": action["tool_name"],
+                "action_definition": deepcopy(selected),
+                "share_result": selected.get("share_result_with_backend") is True,
+                "return_result": selected.get("return_result_to_user") is True,
+                "result_limit": _bounded_int(policy.get("max_result_chars"), 2000, 1, _MAX_RESULT_CHARS),
+            }
             finish_main_step(agent, "Selected eligible action",
                              confidence=result.confidence,
                              detail="Submitted to Agent Zero for normal execution",
                              action_name=action["tool_name"])
             return json.dumps(action, separators=(",", ":"))
+        state["complete"] = True
         finish_main_step(agent, "Handed off to Main",
                          confidence=result.confidence,
                          detail="No eligible action met the policy")
     except (DecisionError, ValueError, TypeError, OSError):
+        state["complete"] = True
         finish_main_step(agent, "Handed off to Main", detail="Decision unavailable")
     return None
 

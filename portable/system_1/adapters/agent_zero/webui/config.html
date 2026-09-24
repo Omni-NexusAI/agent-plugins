@@ -1,7 +1,25 @@
 <html>
 <head><title>System 1</title></head>
 <body>
-  <div x-data="{ status: 'Not checked', busy: false, section: 'main',
+  <style>
+    .system-one-settings .field-control { min-width: 0; }
+    .system-one-settings .field-control > input,
+    .system-one-settings .field-control > select,
+    .system-one-settings .field-control > textarea { min-width: 0; max-width: 100%; }
+    .system-one-settings .system-one-status-control { flex-wrap: wrap; gap: 0.5rem; }
+    .system-one-settings .system-one-status-control > select { flex: 1 1 12rem; width: auto; }
+    .system-one-settings .system-one-status-control > button { flex: 0 0 auto; }
+    .system-one-settings .system-one-status-control > span { flex: 1 1 8rem; overflow-wrap: anywhere; }
+    @media (max-width: 768px) {
+      .system-one-settings .field { display: block; }
+      .system-one-settings .field-label { padding-right: 0; }
+      .system-one-settings .field-control { width: 100%; }
+      .system-one-settings .field-control > input,
+      .system-one-settings .field-control > select,
+      .system-one-settings .field-control > textarea { width: 100%; }
+    }
+  </style>
+  <div class="system-one-settings" x-data="{ status: 'Not checked', busy: false, section: 'main',
     applyPreset() {
       const presets = {
         fast: { min_choice_probability: 0.7, timeout_seconds: 1.0, monitor_interval_seconds: 0.25 },
@@ -22,20 +40,28 @@
         this.status = result.status || 'Unavailable';
       } catch { this.status = 'Unavailable'; }
       finally { this.busy = false; }
-    } }">
+    } }" x-init="config.policy.max_actions_per_turn ??= 3; config.policy.max_result_chars ??= 2000">
     <div class="section-title">System 1</div>
     <div class="section-description">Finite-choice decisions use the selected backend. Agent Zero still validates and executes actions.</div>
     <div class="field">
       <div class="field-label"><div class="field-title">Backend status</div><div class="field-description">Checks the selected decision service on request.</div></div>
-      <div class="field-control"><select x-model="section"><option value="main">Main</option><option value="utility">Utility</option><option value="embedding">Embedding</option></select><button type="button" @click="check()" :disabled="busy">Check connection</button><span role="status" aria-live="polite" x-text="busy ? 'Checking…' : status"></span></div>
+      <div class="field-control system-one-status-control"><select x-model="section"><option value="main">Main</option><option value="utility">Utility</option><option value="embedding">Embedding</option></select><button type="button" @click="check()" :disabled="busy">Check connection</button><span role="status" aria-live="polite" x-text="busy ? 'Checking…' : status"></span></div>
     </div>
     <div class="field">
       <div class="field-label"><div class="field-title">Decision preset</div><div class="field-description">Starting values for confidence, timeout, and monitoring. Each can be adjusted below.</div></div>
       <div class="field-control"><select x-model="config.policy.preset" @change="applyPreset()"><option value="fast">Fast</option><option value="balanced">Balanced</option><option value="conservative">Conservative</option></select></div>
     </div>
     <div class="field">
-      <div class="field-label"><div class="field-title">Action eligibility</div><div class="field-description">Exact tool names and arguments that System 1 may select. Other actions escalate to Main.</div></div>
+      <div class="field-label"><div class="field-title">Action eligibility</div><div class="field-description">Exact tool names and arguments that System 1 may select. An action can opt into sharing its result with the next decision or returning that result to the user. Other actions escalate to Main.</div></div>
       <div class="field-control"><textarea x-model="config.policy._actions_json" @blur="try { config.policy.actions = JSON.parse(config.policy._actions_json || '{}'); $el.setCustomValidity(''); } catch { $el.setCustomValidity('Enter a JSON object of fixed actions'); $el.reportValidity(); }" x-init="config.policy._actions_json = JSON.stringify(config.policy.actions || {}, null, 2)" spellcheck="false"></textarea></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Actions per turn</div><div class="field-description">Maximum System 1 actions before the next step goes to Main.</div></div>
+      <div class="field-control"><input type="number" min="1" max="8" step="1" x-model.number="config.policy.max_actions_per_turn" /></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Observed result limit</div><div class="field-description">Maximum characters from a tool result passed to the next System 1 decision when that action allows it.</div></div>
+      <div class="field-control"><input type="number" min="1" max="4000" step="1" x-model.number="config.policy.max_result_chars" /></div>
     </div>
     <div class="field">
       <div class="field-label"><div class="field-title">Minimum choice probability</div><div class="field-description">Lower confidence escalates to the normal model.</div></div>

@@ -14,7 +14,9 @@ class TimelineTests(unittest.TestCase):
         helpers = types.ModuleType("helpers")
         self.config = {"main": {"enabled": True, "backend": "openrouter"}}
         helpers.plugins = types.SimpleNamespace(get_plugin_config=lambda *_: self.config)
-        self.modules = patch.dict(sys.modules, {"helpers": helpers})
+        runtime = types.ModuleType("usr.plugins.system_1.helpers.runtime")
+        runtime.should_decide = lambda agent: agent.loop_data.iteration == 0
+        self.modules = patch.dict(sys.modules, {"helpers": helpers, runtime.__name__: runtime})
         self.modules.start()
         spec = importlib.util.spec_from_file_location("system_one_timeline_test", SOURCE)
         self.timeline = importlib.util.module_from_spec(spec)
@@ -49,6 +51,15 @@ class TimelineTests(unittest.TestCase):
         self.config["main"]["enabled"] = False
         self.timeline.start_main_step(self.agent)
         self.assertFalse(self.logged)
+
+    def test_follow_up_step_only_when_another_decision_is_ready(self):
+        runtime = sys.modules["usr.plugins.system_1.helpers.runtime"]
+        self.agent.loop_data.iteration = 1
+        self.timeline.start_main_step(self.agent)
+        self.assertFalse(self.logged)
+        runtime.should_decide = lambda agent: True
+        self.timeline.start_main_step(self.agent)
+        self.assertEqual(len(self.logged), 1)
 
 
 if __name__ == "__main__":

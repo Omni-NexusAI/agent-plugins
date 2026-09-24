@@ -80,6 +80,175 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(json.loads(result)["tool_name"], "memory_load")
         self.assertEqual(self.timeline_events[-1][1]["action_name"], "memory_load")
 
+    def test_host_result_drives_next_decision_without_replaying_action(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        self.config["policy"]["actions"] = {
+            "lookup": {"tool_name": "memory_load", "tool_args": {"query": "project"},
+                       "share_result_with_backend": True, "return_result_to_user": True}}
+        states = []
+        async def decide(state, choices):
+            states.append((state, list(choices)))
+            return types.SimpleNamespace(choice="lookup" if len(states) == 1 else "finish",
+                                         confidence=0.99, backend="jev")
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        first = asyncio.run(self.runtime.main_decision(agent))
+        self.assertEqual(json.loads(first)["tool_name"], "memory_load")
+        self.assertFalse(self.runtime.should_decide(agent))
+        self.assertFalse(self.runtime.record_host_result(agent, "other_tool", "wrong result"))
+        self.assertTrue(self.runtime.record_host_result(agent, "memory_load", "Project fact"))
+        agent.loop_data.iteration = 1
+        self.assertTrue(self.runtime.should_decide(agent))
+        second = asyncio.run(self.runtime.main_decision(agent))
+        self.assertEqual(json.loads(second), {"tool_name": "response",
+                                              "tool_args": {"text": "Project fact"}})
+        self.assertIn("Project fact", states[1][0])
+        self.assertNotIn("lookup", states[1][1])
+        self.assertFalse(self.runtime.should_decide(agent))
+
+    def test_new_monologue_discards_pending_result_and_action_budget(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        self.config["policy"]["actions"] = {
+            "lookup": {"tool_name": "memory_load", "tool_args": {"query": "project"}}}
+        async def decide(state, choices):
+            return types.SimpleNamespace(choice="lookup", confidence=0.99, backend="jev")
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        self.assertIsNotNone(asyncio.run(self.runtime.main_decision(agent)))
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        self.assertTrue(self.runtime.should_decide(agent))
+        self.assertIsNotNone(asyncio.run(self.runtime.main_decision(agent)))
+
+    def test_result_content_is_withheld_by_default(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        self.config["policy"]["actions"] = {
+            "lookup": {"tool_name": "memory_load", "tool_args": {"query": "project"}},
+            "next": {"tool_name": "memory_load", "tool_args": {"query": "next"}}}
+        states = []
+        async def decide(state, choices):
+            states.append(state)
+            return types.SimpleNamespace(choice="lookup" if len(states) == 1 else "main",
+                                         confidence=0.99, backend="jev")
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        self.assertIsNotNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertTrue(self.runtime.record_host_result(agent, "memory_load", "PRIVATE TOOL OUTPUT"))
+        agent.loop_data.iteration = 1
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertNotIn("PRIVATE TOOL OUTPUT", states[1])
+
+    def test_revoked_result_permission_is_checked_before_next_backend_call(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        self.config["policy"]["actions"] = {
+            "lookup": {"tool_name": "memory_load", "tool_args": {"query": "project"},
+                       "share_result_with_backend": True},
+            "next": {"tool_name": "memory_load", "tool_args": {"query": "next"}}}
+        states = []
+
+        async def decide(state, choices):
+            states.append(state)
+            return types.SimpleNamespace(choice="lookup" if len(states) == 1 else "main",
+                                         confidence=0.99, backend="jev")
+
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        self.assertIsNotNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertTrue(self.runtime.record_host_result(agent, "memory_load", "TOOL_RESULT_SENTINEL"))
+        self.config["policy"]["actions"]["lookup"]["share_result_with_backend"] = False
+        agent.loop_data.iteration = 1
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertNotIn("TOOL_RESULT_SENTINEL", states[1])
+
+    def test_follow_up_state_preserves_original_request_with_long_result(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        self.config["policy"]["max_state_chars"] = 256
+        self.config["policy"]["actions"] = {
+            "lookup": {"tool_name": "memory_load", "tool_args": {"query": "project"},
+                       "share_result_with_backend": True},
+            "next": {"tool_name": "memory_load", "tool_args": {"query": "next"}}}
+        states = []
+
+        async def decide(state, choices):
+            states.append(state)
+            return types.SimpleNamespace(choice="lookup" if len(states) == 1 else "main",
+                                         confidence=0.99, backend="jev")
+
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        agent.last_user_message = types.SimpleNamespace(output_text=lambda: "USER_TASK_SENTINEL")
+        self.assertIsNotNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertTrue(self.runtime.record_host_result(agent, "memory_load", "R" * 520))
+        agent.loop_data.iteration = 1
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertIn("USER_TASK_SENTINEL", states[1])
+        self.assertLessEqual(len(states[1]), 256)
+
+    def test_changed_action_during_decision_cannot_dispatch(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        action = {"tool_name": "memory_load", "tool_args": {"query": "safe"}}
+        self.config["policy"]["actions"] = {"lookup": action}
+        async def decide(state, choices):
+            action["tool_args"]["query"] = "changed"
+            return types.SimpleNamespace(choice="lookup", confidence=0.99, backend="jev")
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(Agent())))
+
+    def test_reduced_action_cap_prevents_late_dispatch(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        self.config["policy"]["actions"] = {
+            "one": {"tool_name": "memory_load", "tool_args": {"query": "one"}},
+            "two": {"tool_name": "memory_load", "tool_args": {"query": "two"}}}
+        calls = 0
+        async def decide(state, choices):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                self.config["policy"]["max_actions_per_turn"] = 1
+            return types.SimpleNamespace(choice="one" if calls == 1 else "two",
+                                         confidence=0.99, backend="jev")
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        self.assertIsNotNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertTrue(self.runtime.record_host_result(agent, "memory_load", "one result"))
+        agent.loop_data.iteration = 1
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
+
+    def test_reserved_decision_ids_are_not_actions(self):
+        self.config["policy"]["actions"] = {
+            "main": {"tool_name": "response", "tool_args": {"text": "wrong"}},
+            "finish": {"tool_name": "response", "tool_args": {"text": "wrong"}},
+            "specialist_tool": {"tool_name": "response", "tool_args": {"text": "wrong"}},
+            "safe": {"tool_name": "memory_load", "tool_args": {"query": "safe"}}}
+        self.assertEqual(list(self.runtime.allowed_actions(self.config["policy"])), ["safe"])
+
+    def test_intervention_during_decision_prevents_stale_tool(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        self.config["policy"]["actions"] = {
+            "lookup": {"tool_name": "memory_load", "tool_args": {"query": "old"}}}
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        agent.last_user_message = types.SimpleNamespace(output_text=lambda: "Old request")
+        async def decide(state, choices):
+            agent.last_user_message = types.SimpleNamespace(output_text=lambda: "New request")
+            return types.SimpleNamespace(choice="lookup", confidence=0.99, backend="jev")
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertFalse(self.runtime.should_decide(agent))
+
 
 if __name__ == "__main__":
     unittest.main()
