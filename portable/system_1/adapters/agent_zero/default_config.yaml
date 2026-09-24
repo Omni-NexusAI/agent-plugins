@@ -10,6 +10,7 @@ utility:
   model: jev-latest
   endpoint: https://api.typesafe.ai/v1/systemone
   token_env: SYSTEM_1_JEV_API_KEY
+  fixed_routes: []
 embedding:
   enabled: false
   backend: jev

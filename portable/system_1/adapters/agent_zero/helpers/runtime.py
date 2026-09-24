@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
 import json
 import os
@@ -10,6 +11,7 @@ from helpers import plugins
 from usr.plugins.system_1.helpers.system_1_core import DecisionClient, DecisionError
 from usr.plugins.system_1.helpers.system_1_core.decision import selected_action
 from usr.plugins.system_1.helpers.timeline import finish_main_step
+from usr.plugins.system_1.helpers.tool_availability import is_tool_available
 
 
 PLUGIN = "system_1"
@@ -37,10 +39,14 @@ def _turn_state(agent, *, create: bool = False) -> dict | None:
         return state
     if not create:
         return None
+    if isinstance(state, dict):
+        _cancel_main_task(state)
     state = {"loop_data": loop_data, "user_message": user_message,
              "attempted_iteration": -1,
              "actions_submitted": 0, "used_action_ids": set(),
-             "pending": None, "observation": None, "complete": False}
+             "pending": None, "observation": None, "complete": False,
+             "main_task": None, "main_started_actions": -1,
+             "main_requested": False, "main_guidance": ""}
     setattr(agent, _TURN_STATE, state)
     return state
 
@@ -54,6 +60,7 @@ def should_decide(agent) -> bool:
     if (isinstance(raw_state, dict) and
             raw_state.get("loop_data") is agent.loop_data and
             raw_state.get("user_message") is not getattr(agent, "last_user_message", None)):
+        _cancel_main_task(raw_state)
         return False  # An intervention changed the request inside this monologue.
     state = _turn_state(agent)
     if iteration == 0:
@@ -86,6 +93,80 @@ def record_host_result(agent, tool_name: str, tool_result: str) -> bool:
     }
     state["pending"] = None
     return True
+
+
+def _cancel_main_task(state: dict) -> None:
+    task = state.get("main_task")
+    if isinstance(task, asyncio.Task) and not task.done():
+        try:
+            task.cancel()
+        except RuntimeError:
+            # The host can end a monologue after its event loop has closed.
+            pass
+    state["main_task"] = None
+
+
+def _complete(state: dict) -> None:
+    state["complete"] = True
+    _cancel_main_task(state)
+
+
+def end_turn(agent) -> None:
+    """Cancel plugin-owned advisory work when the host ends this monologue."""
+    state = getattr(agent, _TURN_STATE, None)
+    if isinstance(state, dict):
+        _complete(state)
+
+
+async def _run_main_correction(agent, decision_state: str, timeout: float) -> dict | None:
+    """Get advisory text from Main without tool execution or history writes."""
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    instruction = ("Reason about the uncertain part of this Agent Zero request. "
+                   "System 1 may independently use tools while you think. Do not call tools, "
+                   "claim tool execution, or assume newer tool results. Return only a JSON "
+                   "object with kind 'correction' and concise text guiding subsequent "
+                   "System 1 choices, or kind 'final' and text for a final response when "
+                   "no further tool result is needed.")
+    messages = [SystemMessage(content=instruction),
+                HumanMessage(content=decision_state[:4000])]
+    try:
+        response, _ = await asyncio.wait_for(agent.call_chat_model(
+            messages=messages, background=True, explicit_caching=False), timeout)
+        parsed = json.loads(response)
+        if not isinstance(parsed, dict) or parsed.get("kind") not in {"correction", "final"}:
+            return None
+        answer = parsed.get("text")
+        if not isinstance(answer, str) or not answer.strip() or len(answer) > 4000:
+            return None
+        return {"kind": parsed["kind"], "text": answer.strip()}
+    except (OSError, ValueError, TypeError, TimeoutError, KeyError):
+        return None
+
+
+def _take_main_result(state: dict) -> dict | None:
+    task = state.get("main_task")
+    if not isinstance(task, asyncio.Task) or not task.done():
+        return None
+    state["main_task"] = None
+    if task.cancelled():
+        return None
+    try:
+        return task.result()
+    except Exception:
+        return None
+
+
+def _consume_main_result(state: dict, result: dict | None) -> str:
+    if not isinstance(result, dict):
+        return ""
+    if result.get("kind") == "correction":
+        state["main_guidance"] = result["text"][:2000]
+    elif (result.get("kind") == "final" and
+          state["actions_submitted"] == state["main_started_actions"]):
+        return result["text"]
+    # A final drafted before later System 1 actions cannot be committed as-is.
+    return ""
 
 
 def delegation_action(role: str, goal: str) -> str:
@@ -168,11 +249,29 @@ def allowed_actions(policy: dict) -> dict:
     if not isinstance(actions, dict):
         return {}
     return {key: value for key, value in actions.items()
-            if isinstance(key, str) and key not in {"", "main", "finish"}
+            if isinstance(key, str) and key not in {"", "main", "finish", "wait_main"}
             and not key.startswith("specialist_") and isinstance(value, dict)
             and isinstance(value.get("tool_name"), str)
             and isinstance(value.get("tool_args"), dict) and value["tool_args"]
             and isinstance(value.get("description", key), str)}
+
+
+def _decision_state(text: str, observation: dict | None, policy: dict,
+                    max_state: int, guidance: str) -> str:
+    """Recheck result-sharing consent before every post-await backend choice."""
+    state = text
+    if observation is not None:
+        prior = allowed_actions(policy).get(observation["action_id"])
+        shared = (observation["result"] if prior == observation["action_definition"]
+                  else "")
+        state = (f"Original request: {text[:max_state // 2]}\n"
+                 f"Prior action: {observation['tool_name']}\n"
+                 f"Observed result: {shared or '[result content withheld by policy]'}")
+    if guidance:
+        guidance_budget = max(32, max_state // 3)
+        state = (state[:max_state - guidance_budget] +
+                 "\nMain correction: " + guidance[:guidance_budget - 18])
+    return state[:max_state]
 
 
 async def main_decision(agent) -> str | None:
@@ -186,13 +285,13 @@ async def main_decision(agent) -> str | None:
     state["attempted_iteration"] = iteration
     settings = config_for(agent, "main")
     if not settings:
-        state["complete"] = True
+        _complete(state)
         finish_main_step(agent, "Handed off to Main", detail="Mode disabled")
         return None
     section, policy = settings
     text = agent.last_user_message.output_text() if agent.last_user_message else ""
     if not text.strip():
-        state["complete"] = True
+        _complete(state)
         finish_main_step(agent, "Handed off to Main", detail="No request text")
         return None
     limit = _bounded_int(policy.get("max_actions_per_turn"), 3, 1, _MAX_ACTIONS)
@@ -203,13 +302,26 @@ async def main_decision(agent) -> str | None:
         if current_prior != observation["action_definition"]:
             observation["result"] = ""
             observation["return_result"] = ""
+        advisory_done = (isinstance(state["main_task"], asyncio.Task) and
+                         state["main_task"].done())
+        _consume_main_result(state, _take_main_result(state))
+        if advisory_done and state["main_requested"] and not state["main_guidance"]:
+            _complete(state)
+            finish_main_step(agent, "Handed off to Main",
+                             detail="Main advisory did not resolve the uncertain work")
+            return None
+    main_pending = isinstance(state["main_task"], asyncio.Task) and not state["main_task"].done()
     actions = {key: value for key, value in allowed_actions(policy).items()
-               if key not in state["used_action_ids"]}
+               if key not in state["used_action_ids"] and
+               (not main_pending or value.get("independent_while_main") is True) and
+               is_tool_available(agent, value["tool_name"])}
     if state["actions_submitted"] >= limit:
         actions = {}
     choices = {"main": "Use Main for complex, uncertain, or open-ended reasoning and actions."}
     choices.update({key: value.get("description", key) for key, value in actions.items()})
-    if observation is not None and observation["return_result"] and not observation["truncated"]:
+    if (observation is not None and observation["return_result"] and
+            not observation["truncated"] and not main_pending and
+            (not state["main_requested"] or bool(state["main_guidance"]))):
         choices["finish"] = "Return the observed tool result to the user without further elaboration."
     offered_actions = deepcopy(actions)
     roles = {}
@@ -220,32 +332,56 @@ async def main_decision(agent) -> str | None:
         except ImportError:
             pass
         if policy.get("action_precedence") == "tool_first" and "tool" in roles:
-            state["complete"] = True
+            _complete(state)
             finish_main_step(agent, "Delegated to Tool", detail="Tool role has precedence")
             return delegation_action("tool", text)
         for role in roles:
             choices[f"specialist_{role}"] = f"Delegate a bounded {role} task to the configured specialist."
     if len(choices) < 2:
-        state["complete"] = True
-        finish_main_step(agent, "Handed off to Main", detail="No eligible choices")
-        return None
+        task = state["main_task"]
+        if isinstance(task, asyncio.Task):
+            try:
+                await task
+            except asyncio.CancelledError:
+                if _turn_state(agent) is state:
+                    raise
+            except Exception:
+                pass
+            if _turn_state(agent) is not state or not config_for(agent, "main"):
+                _complete(state)
+                finish_main_step(agent, "Handed off to Main", detail="Request or mode changed")
+                return None
+            _consume_main_result(state, _take_main_result(state))
+            if state["main_guidance"]:
+                latest_policy = config_for(agent, "main")[1]
+                policy = latest_policy
+                current_limit = _bounded_int(
+                    latest_policy.get("max_actions_per_turn"), 3, 1, _MAX_ACTIONS)
+                actions = {key: value for key, value in allowed_actions(latest_policy).items()
+                           if key not in state["used_action_ids"] and
+                           state["actions_submitted"] < current_limit and
+                           is_tool_available(agent, value["tool_name"])}
+                choices.update({key: value.get("description", key) for key, value in actions.items()})
+                offered_actions = deepcopy(actions)
+        if len(choices) < 2:
+            _complete(state)
+            detail = ("Main advisory applied; no eligible choices" if state["main_guidance"]
+                      else "No eligible choices")
+            finish_main_step(agent, "Handed off to Main", detail=detail)
+            return None
     try:
         client = client_for(section, policy)
         max_state = _bounded_int(policy.get("max_state_chars"), 4000, 256, 16_000)
-        decision_state = text
-        if observation is not None:
-            original = text[:max_state // 2]
-            decision_state = (f"Original request: {original}\n"
-                              f"Prior action: {observation['tool_name']}\n"
-                              f"Observed result: {observation['result'] or '[result content withheld by policy]'}")
-        result = await client.choose(decision_state[:max_state], choices)
+        decision_state = _decision_state(text, observation, policy, max_state,
+                                         state["main_guidance"])
+        result = await client.choose(decision_state, choices)
         if _turn_state(agent) is not state:
-            state["complete"] = True
+            _complete(state)
             finish_main_step(agent, "Handed off to Main", detail="Request changed during decision")
             return None
         latest = config_for(agent, "main")
         if not latest:
-            state["complete"] = True
+            _complete(state)
             finish_main_step(agent, "Handed off to Main", detail="Mode disabled during decision")
             return None
         policy = latest[1]
@@ -257,10 +393,91 @@ async def main_decision(agent) -> str | None:
             if (observation["return_result"] and not observation["truncated"] and
                     prior == observation["action_definition"] and
                     prior.get("return_result_to_user") is True):
-                state["complete"] = True
+                _complete(state)
                 finish_main_step(agent, "Finished from observed result", confidence=result.confidence)
                 return json.dumps({"tool_name": "response", "tool_args": {
                     "text": observation["return_result"]}}, separators=(",", ":"))
+        if result.choice == "main" and result.backend != "chat":
+            # Main joins only when Jev flagged uncertainty. While it thinks,
+            # Jev may choose another action explicitly marked independent.
+            decision_state = _decision_state(text, observation, policy, max_state,
+                                             state["main_guidance"])
+            independent = {key: value for key, value in offered_actions.items()
+                           if value.get("independent_while_main") is True and
+                           actions.get(key) == value}
+            if independent and state["actions_submitted"] < _bounded_int(
+                    policy.get("max_actions_per_turn"), 3, 1, _MAX_ACTIONS):
+                if not state["main_requested"]:
+                    timeout = _bounded_int(policy.get("main_correction_seconds"), 12, 1, 30)
+                    state["main_task"] = asyncio.create_task(
+                        _run_main_correction(agent, decision_state, timeout))
+                    state["main_requested"] = True
+                    state["main_started_actions"] = state["actions_submitted"]
+                task = state["main_task"]
+                if isinstance(task, asyncio.Task):
+                    concurrent_choices = {"wait_main": "Wait for Main's bounded correction or final response."}
+                    concurrent_choices.update({key: value.get("description", key)
+                                               for key, value in independent.items()})
+                    result = await client.choose(decision_state, concurrent_choices)
+                    if _turn_state(agent) is not state or not config_for(agent, "main"):
+                        _complete(state)
+                        finish_main_step(agent, "Handed off to Main", detail="Request or mode changed")
+                        return None
+                    if result.choice == "wait_main" or task.done():
+                        if not task.done():
+                            try:
+                                await task
+                            except asyncio.CancelledError:
+                                if _turn_state(agent) is state:
+                                    raise
+                            except Exception:
+                                pass
+                        if _turn_state(agent) is not state or not config_for(agent, "main"):
+                            _complete(state)
+                            finish_main_step(agent, "Handed off to Main", detail="Request or mode changed")
+                            return None
+                        final_text = _consume_main_result(state, _take_main_result(state))
+                        if final_text:
+                            _complete(state)
+                            finish_main_step(agent, "Main supplied final response")
+                            return json.dumps({"tool_name": "response", "tool_args": {
+                                "text": final_text}}, separators=(",", ":"))
+                        if state["main_guidance"]:
+                            corrected_policy = config_for(agent, "main")[1]
+                            corrected_state = _decision_state(
+                                text, observation, corrected_policy, max_state,
+                                state["main_guidance"])
+                            corrected_limit = _bounded_int(
+                                corrected_policy.get("max_actions_per_turn"), 3, 1, _MAX_ACTIONS)
+                            corrected_available = {
+                                key: value for key, value in allowed_actions(corrected_policy).items()
+                                if key not in state["used_action_ids"] and
+                                state["actions_submitted"] < corrected_limit and
+                                is_tool_available(agent, value["tool_name"])}
+                            offered_actions = deepcopy(corrected_available)
+                            corrected_choices = {"main": "Hand off to Main for the remaining work."}
+                            corrected_choices.update({key: value.get("description", key)
+                                                      for key, value in offered_actions.items()})
+                            result = (await client.choose(corrected_state, corrected_choices)
+                                      if len(corrected_choices) > 1 else None)
+                        else:
+                            result = None
+                    else:
+                        offered_actions = deepcopy(independent)
+                    latest = config_for(agent, "main")
+                    if _turn_state(agent) is not state or not latest:
+                        _complete(state)
+                        finish_main_step(agent, "Handed off to Main", detail="Request or mode changed")
+                        return None
+                    policy = latest[1]
+                    actions = allowed_actions(policy)
+                    threshold = float(policy.get("min_choice_probability", 0.85))
+            # Without an independent eligible action, normal Main owns the
+            # request immediately; no duplicate background call is started.
+        if result is None or _turn_state(agent) is not state:
+            _complete(state)
+            finish_main_step(agent, "Handed off to Main", detail="Correction unavailable or request changed")
+            return None
         if iteration == 0 and result.choice.startswith("specialist_") and result.confidence >= threshold:
             role = result.choice.removeprefix("specialist_")
             try:
@@ -269,7 +486,7 @@ async def main_decision(agent) -> str | None:
             except ImportError:
                 current_roles = {}
             if role in current_roles:
-                state["complete"] = True
+                _complete(state)
                 finish_main_step(agent, f"Delegated to {role.title()}",
                                  confidence=result.confidence)
                 return delegation_action(role, text)
@@ -278,7 +495,8 @@ async def main_decision(agent) -> str | None:
         if (result.backend != "chat" and result.choice not in state["used_action_ids"]
                 and state["actions_submitted"] < current_limit
                 and result.choice in offered_actions
-                and actions.get(result.choice) == offered_actions[result.choice]):
+                and actions.get(result.choice) == offered_actions[result.choice]
+                and is_tool_available(agent, actions[result.choice]["tool_name"])):
             action = selected_action(result, actions, threshold=threshold)
         if action:
             selected = actions[result.choice]
@@ -293,15 +511,21 @@ async def main_decision(agent) -> str | None:
             }
             finish_main_step(agent, "Selected eligible action",
                              confidence=result.confidence,
-                             detail="Submitted to Agent Zero for normal execution",
+                             detail=("Main correction applied; submitted to Agent Zero"
+                                     if state["main_guidance"] else
+                                     "Main advisory requested; submitted to Agent Zero"
+                                     if state["main_requested"] else
+                                     "Submitted to Agent Zero for normal execution"),
                              action_name=action["tool_name"])
             return json.dumps(action, separators=(",", ":"))
-        state["complete"] = True
+        _complete(state)
         finish_main_step(agent, "Handed off to Main",
                          confidence=result.confidence,
-                         detail="No eligible action met the policy")
+                         detail=("Main correction applied; no eligible action met the policy"
+                                 if state["main_guidance"] else
+                                 "No eligible action met the policy"))
     except (DecisionError, ValueError, TypeError, OSError):
-        state["complete"] = True
+        _complete(state)
         finish_main_step(agent, "Handed off to Main", detail="Decision unavailable")
     return None
 

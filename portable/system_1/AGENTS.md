@@ -24,7 +24,19 @@
   Native chat providers may route, but their self-reported confidence never
   authorizes direct fixed action dispatch.
 - Embedding vectors remain the host embedding model's output.
+- Utility fixed responses require an explicit exact system/message route and a
+  predeclared finite response. A guarded model wrapper must preserve the host
+  Utility call and callback shape, recheck the request and route at call time,
+  and fall back to the original Utility model on uncertainty or errors.
+  Generative Utility requests are ineligible. Count all hook calls, decisions, bypasses,
+  fallbacks, and timing without retaining prompts or credentials. Bound the
+  complete decision payload, including fixed response choices, and avoid a
+  second decision call after a route has already fallen back.
 - Keep memory and monitoring work bounded. No background task may mutate agent state directly.
+- Main correction begins only for an uncertain subtask. While it is pending,
+  System 1 may dispatch only explicitly opted-in independent actions through
+  the host. Recheck the request and configuration before accepting later advice;
+  stale advice must not commit an action or overwrite a newer result.
 - On Agent Zero, the first model turn is loop iteration zero. A later
   iteration can make another System 1 decision only after an observed result
   from its pending tool, within the action cap; other iterations belong to Main.

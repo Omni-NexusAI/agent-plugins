@@ -1,10 +1,15 @@
 from helpers.extension import Extension
 from usr.plugins.system_1.helpers.runtime import memory_decision, utility_decision
+from usr.plugins.system_1.helpers.utility import install_fixed_utility_response, metrics
 
 
 class SystemOneUtility(Extension):
     async def execute(self, call_data: dict, **kwargs):
         if self.agent:
+            metrics(self.agent)["calls"] += 1
+            route = await install_fixed_utility_response(self.agent, call_data)
+            if route.bypassed or route.attempted:
+                return
             system = call_data.get("system", "")
             if isinstance(system, str):
                 if "previous memories are stored" in system:

@@ -40,7 +40,42 @@ has no direct actions to dispatch. If Auxiliary Model Roles is installed and
 configured, System 1 may delegate a Tool or Coding goal through Agent Zero's
 normal `auxiliary_delegate` tool. The specialist result returns to Main.
 
-Utility decisions add conservative instructions to eligible utility requests.
+Utility can bypass a model call only for an explicitly configured exact system
+and message pair with predeclared response choices. The finite backend chooses
+one response or `ordinary`; a confidence below the policy threshold, a changed
+request or configuration, and any backend error use the original Utility model.
+Chat backends cannot authorize fixed responses. Each response is limited to
+4000 characters, and the normal Utility callback receives the selected text.
+The exact system instruction, message, and configured response choices are sent
+to the chosen decision backend; configure these routes only with content that
+backend may receive. The combined decision payload is bounded by
+`max_state_chars`, and oversized routes use the original Utility model.
+The adapter keeps per-agent `calls`, `decisions`, `bypassed`, and `fallbacks` counters,
+plus cumulative `decision_seconds` and `fallback_model_seconds`, without
+retaining prompts or secrets. `fallback_model_seconds` times only a model call
+made after a previously selected fixed response is revoked; it does not measure
+ordinary Utility generation. The counters are available through
+`helpers.utility.metrics(agent)` for local inspection and tests; they reset
+with the agent object. Unmatched and open-ended calls retain the existing
+conservative Utility guidance and normal model path.
+
+For example, a known Utility caller with exact prompt text can opt into two
+fixed outputs:
+
+```yaml
+utility:
+  fixed_routes:
+    - system: "Classify this exact request as yes or no."
+      message: "Is this item ready?"
+      responses:
+        yes: "yes"
+        no: "no"
+```
+
+Match against the text after Agent Zero's secret masking hook. Do not configure
+fixed outputs for summaries, query generation, memory ingestion, or other work
+that needs generated content.
+
 Embedding decisions guide the existing memory plugin's query preparation and
 ingestion summaries; the configured embedding model and vector index remain
 unchanged. The plugin page has Fast, Balanced, and Conservative starting
@@ -62,6 +97,7 @@ policy:
         limit: 3
       share_result_with_backend: true
       return_result_to_user: false
+      independent_while_main: false
 ```
 
 `share_result_with_backend` sends at most `max_result_chars` (default 2000)
@@ -70,6 +106,14 @@ of the observed result to the next decision. It is false by default.
 route that returns the observed result without rewriting it. Use it only for
 tools whose complete result is suitable for display; truncated results cannot
 take that finish route. The two permissions are independent.
+
+`independent_while_main` is a separate per-action opt-in for a fixed action
+that remains valid while Main reasons about an uncertain subtask. Leave it
+false for actions that depend on Main's pending answer, may change the same
+state Main is reviewing, or could produce a duplicate effect. System 1 submits
+an opted-in action through the normal host tool path; Main's later advice is
+applied only to subsequent decisions. A changed request or action definition
+invalidates the pending choice.
 
 Only configure actions whose exact tool schema and permissions you have
 verified on the installed Agent Zero version. There is no automatic local to
