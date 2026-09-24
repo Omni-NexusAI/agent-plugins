@@ -7,8 +7,13 @@ standard chat providers for bounded routing. Configure existing services; instal
 downloads a model or starts a server. The standard llama.cpp server does not
 provide this decision endpoint.
 
-The plugin is disabled by default. In the Main, Utility, and Embedding model
-sections, enable **System One Mode** and select a backend, model, and endpoint.
+The plugin is disabled by default. Configure the shared **Decider Model** beside
+Agent Zero's model sections, then enable **System One Mode** independently in
+Main, Utility, or Embedding. Decider holds the provider, model name, endpoint,
+credential, and context window for all enabled modes. The toggles decide where
+Agent Zero uses that shared decision service. Decider settings save through the
+plugin and apply across model presets; they do not change the selected Main,
+Utility, or Embedding model.
 When Main mode is enabled, each eligible decision appears as an expandable **S1**
 step in the chat process timeline. It shows whether System 1 selected an
 eligible action, delegated to a specialist, or handed off to Main, plus backend,
@@ -16,8 +21,14 @@ elapsed time, and confidence when available. Native Gen and Tool steps remain
 unchanged. For a selected action, S1 names the tool submitted to Agent Zero;
 the native Tool step shows its actual execution and result. The S1 detail
 intentionally omits request text and tool arguments.
-These first-iteration mode settings are global across model presets and agent
-profiles; each model category has its own toggle and backend selection.
+These mode toggles are global across model presets and agent profiles. Existing
+per-section connections migrate to Decider on read when they agree among
+enabled modes. If enabled modes have different saved connections, choose the
+shared Decider in the model editor; the old values remain for rollback until
+you change them. The context window limits each complete decision request while
+reserving room for choices and a response. An oversized request escalates without
+truncating observations, corrections, or Utility text. It does not alter Main or
+Utility context size.
 For hosted Jev, set the configured environment variable (default
 `SYSTEM_1_JEV_API_KEY`) through Agent Zero's environment settings. OpenRouter
 uses Agent Zero's shared OpenRouter key and its Decisions API; the model
@@ -113,7 +124,8 @@ false for actions that depend on Main's pending answer, may change the same
 state Main is reviewing, or could produce a duplicate effect. System 1 submits
 an opted-in action through the normal host tool path; Main's later advice is
 applied only to subsequent decisions. A changed request or action definition
-invalidates the pending choice.
+invalidates the pending choice. A timed-out Main advisory does not delay later
+System 1 decisions or apply a late correction.
 
 Only configure actions whose exact tool schema and permissions you have
 verified on the installed Agent Zero version. There is no automatic local to

@@ -10,6 +10,20 @@
   let loading;
   let timer;
   let modelStore;
+  const connectionFields = ['backend', 'provider', 'model', 'endpoint', 'token_env', 'context_window'];
+
+  function migrateDecider(config) {
+    if (config.decider && typeof config.decider === 'object') return;
+    const sections = ['main', 'utility', 'embedding'].map(key => config[key]).filter(item => item && typeof item === 'object');
+    const enabled = sections.filter(item => item.enabled);
+    const connections = (enabled.length ? enabled : sections).map(item =>
+      Object.fromEntries(connectionFields.filter(key => Object.prototype.hasOwnProperty.call(item, key))
+        .map(key => [key, item[key]])));
+    if (connections.length && Object.keys(connections[0]).length &&
+        connections.every(item => connectionFields.every(key => item[key] === connections[0][key]))) {
+      config.decider = { ...connections[0], context_window: connections[0].context_window ?? 8192 };
+    }
+  }
 
   async function api(path, body) {
     const { fetchApi } = await import('/js/api.js');
@@ -29,6 +43,7 @@
       modelStore = globalThis.Alpine?.store?.('modelConfig');
       await modelStore?.ensureLoaded?.();
       settings = result.data || {};
+      migrateDecider(settings);
       return settings;
     }).catch(error => { loading = null; throw error; });
     return loading;
@@ -83,6 +98,7 @@
   function modelInput(entry, provider, status) {
     const control = document.createElement('div'); control.style.position = 'relative'; control.style.width = '100%';
     const input = textInput(entry.model, value => { entry.model = value; saveLater(status); });
+    input.setAttribute('aria-label', 'Decider model name');
     input.style.paddingRight = '32px'; input.style.width = '100%';
     const searchButton = iconButton('search', 'Search available models');
     const results = document.createElement('div'); results.className = 'model-search-results'; results.hidden = true;
@@ -155,36 +171,82 @@
       indicator.className = 'toggler';
       switchLabel.append(toggle, indicator);
       root.append(field('System One Mode', description, switchLabel));
-      const details = document.createElement('div');
-      root.append(details);
-      const provider = document.createElement('select');
-      const providers = [['jev', 'Jev (hosted decision API)'], ['llama_decision', 'llama.cpp decision endpoint'],
-        ...(modelStore?.chatProviders || []).map(item => [item.value, item.label])];
-      const seen = new Set();
-      providers.forEach(([id, label]) => {
-        if (!id || seen.has(id)) return; seen.add(id);
-        const option = document.createElement('option');
-        option.value = id; option.textContent = label; provider.append(option);
-      });
-      provider.value = entry.provider || entry.backend || 'jev';
-      provider.addEventListener('change', () => {
-        entry.provider = provider.value;
-        entry.backend = provider.value === 'jev' ? 'jev'
-          : ['llama_decision', 'llama_cpp'].includes(provider.value) ? 'llama_decision'
-          : provider.value === 'openrouter' ? 'openrouter' : 'chat';
-        entry.endpoint = '';
-        entry.model = '';
-        renderDetails(); saveLater(status);
-      });
-      function renderDetails() {
-        details.replaceChildren();
-        details.hidden = !toggle.checked;
-        if (!toggle.checked) return;
-        details.append(field('Provider', 'Decision service for this model section.', provider));
-        details.append(field('Model name', 'Model identifier. Click the field or search icon to browse available models.',
+      toggle.addEventListener('change', () => { entry.enabled = toggle.checked; saveLater(status); });
+      status.textContent = '';
+      root.append(status);
+      root.removeAttribute('aria-busy');
+    } catch {
+      status.textContent = 'System 1 settings unavailable';
+      root.removeAttribute('aria-busy');
+    }
+  }
+
+  async function mountDecider(body) {
+    if (body.querySelector(':scope > .system-one-decider')) return;
+    const section = document.createElement('section');
+    section.className = 'preset-model-section system-one-decider';
+    section.setAttribute('aria-busy', 'true');
+    const heading = document.createElement('div');
+    heading.className = 'preset-model-heading';
+    const title = document.createElement('div');
+    title.className = 'section-title'; title.textContent = 'Decider Model';
+    const description = document.createElement('div');
+    description.className = 'section-description';
+    description.textContent = 'Shared System 1 decision model across Main, Utility, and Embedding. Changes save automatically for all presets.';
+    heading.append(title, description); section.append(heading);
+    const content = document.createElement('div'); section.append(content);
+    const status = document.createElement('div');
+    status.className = 'field-description'; status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite'); status.textContent = 'Loading Decider Model settings…';
+    section.append(status); body.append(section);
+    try {
+      await load();
+      if (!section.isConnected) return;
+      function render() {
+        content.replaceChildren();
+        const entry = settings.decider;
+        if (!entry || typeof entry !== 'object') {
+          const choices = ['main', 'utility', 'embedding'].filter(key => settings[key]?.model);
+          const selector = document.createElement('select');
+          selector.setAttribute('aria-label', 'Choose legacy Decider model');
+          selector.append(new Option('— select saved model —', ''));
+          choices.forEach(key => selector.append(new Option(`${key[0].toUpperCase()}${key.slice(1)} saved model`, key)));
+          selector.addEventListener('change', () => {
+            const source = settings[selector.value];
+            if (!source) return;
+            settings.decider = Object.fromEntries(connectionFields
+              .filter(key => Object.prototype.hasOwnProperty.call(source, key)).map(key => [key, source[key]]));
+            settings.decider.context_window ??= 8192;
+            render(); saveLater(status);
+          });
+          content.append(field('Saved model choice', 'Enabled System One Mode sections have different saved models. Choose which connection becomes the shared Decider; all original settings remain available.', selector));
+          status.textContent = 'Select a shared Decider Model to finish migration.';
+          return;
+        }
+        const provider = document.createElement('select');
+        provider.setAttribute('aria-label', 'Decider provider');
+        const providers = [['jev', 'Jev (hosted decision API)'], ['llama_decision', 'llama.cpp decision endpoint'],
+          ...(modelStore?.chatProviders || []).map(item => [item.value, item.label])];
+        const seen = new Set();
+        providers.forEach(([id, label]) => {
+          if (!id || seen.has(id)) return; seen.add(id);
+          provider.append(new Option(label, id));
+        });
+        provider.value = entry.provider || entry.backend || 'jev';
+        provider.addEventListener('change', () => {
+          entry.provider = provider.value;
+          entry.backend = provider.value === 'jev' ? 'jev'
+            : ['llama_decision', 'llama_cpp'].includes(provider.value) ? 'llama_decision'
+            : provider.value === 'openrouter' ? 'openrouter' : 'chat';
+          entry.endpoint = ''; entry.model = '';
+          render(); saveLater(status);
+        });
+        content.append(field('Provider', 'Decision service used by each enabled System One Mode.', provider));
+        content.append(field('Model name', 'Model identifier. Click the field or search icon to browse available models.',
           modelInput(entry, provider, status)));
         const credential = document.createElement('input');
         credential.type = 'password'; credential.autocomplete = 'off';
+        credential.setAttribute('aria-label', 'Decider API key');
         credential.placeholder = '••••••••••••'; credential.style.paddingRight = '32px'; credential.style.width = '100%';
         const reveal = iconButton('visibility_off', 'Show API key');
         reveal.addEventListener('click', () => {
@@ -206,24 +268,39 @@
           } catch { status.textContent = 'API key not saved'; }
           finally { credential.disabled = false; }
         });
-        const control = document.createElement('div');
-        control.style.position = 'relative'; control.style.width = '100%'; control.append(credential, reveal);
-        details.append(field('API key', 'Authentication key for this provider.', control));
-        details.append(field('API base URL', 'Custom endpoint URL. Leave empty to use the provider default.',
-          textInput(entry.endpoint, value => { entry.endpoint = value; saveLater(status); })));
+        const keyControl = document.createElement('div');
+        keyControl.style.position = 'relative'; keyControl.style.width = '100%';
+        keyControl.append(credential, reveal);
+        content.append(field('API key', 'Authentication key for the selected provider.', keyControl));
+        const base = textInput(entry.endpoint, value => { entry.endpoint = value; saveLater(status); });
+        base.setAttribute('aria-label', 'Decider API base URL');
+        content.append(field('API base URL', 'Custom endpoint URL. Leave empty to use the provider default.', base));
+        const context = document.createElement('input');
+        context.type = 'number'; context.min = '1024'; context.max = '1000000'; context.step = '1';
+        context.value = entry.context_window ?? 8192;
+        context.setAttribute('aria-label', 'Decider context window size');
+        context.addEventListener('change', () => {
+          const value = Number(context.value);
+          if (!Number.isSafeInteger(value) || value < 1024 || value > 1000000) {
+            context.setCustomValidity('Enter 1024 to 1000000 tokens'); context.reportValidity();
+            return;
+          }
+          context.setCustomValidity(''); entry.context_window = value; saveLater(status);
+        });
+        content.append(field('Context window size', 'Maximum tokens available to the Decider request, its choices, and its response.', context));
       }
-      toggle.addEventListener('change', () => { entry.enabled = toggle.checked; renderDetails(); saveLater(status); });
-      renderDetails();
-      status.textContent = '';
-      root.append(status);
-      root.removeAttribute('aria-busy');
+      render(); section.removeAttribute('aria-busy');
+      if (settings.decider) status.textContent = 'Changes save automatically, separately from model presets.';
     } catch {
-      status.textContent = 'System 1 settings unavailable';
-      root.removeAttribute('aria-busy');
+      status.textContent = 'Decider Model settings unavailable';
+      section.removeAttribute('aria-busy');
     }
   }
 
-  function scan() { document.querySelectorAll('.model-section, .preset-model-section').forEach(mount); }
+  function scan() {
+    document.querySelectorAll('.model-section, .preset-model-section').forEach(mount);
+    document.querySelectorAll('.preset-editor-body').forEach(mountDecider);
+  }
   document.addEventListener('DOMContentLoaded', scan, { once: true });
   document.addEventListener('alpine:init', () => setTimeout(scan, 0));
   new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true });
@@ -231,6 +308,13 @@
 })();
 </script>
 <style>
+@media (max-width: 600px) {
+  .system-one-decider .field { display: block; }
+  .system-one-decider .field-label { padding-right: 0; }
+  .system-one-decider .field-control { width: 100%; }
+  .system-one-decider .field-control > input,
+  .system-one-decider .field-control > select { width: 100%; }
+}
 /* Only the Info record explicitly marked by System 1 receives this accent. */
 .process-group .process-step.system-one-step {
   --step-accent: #fb7185;

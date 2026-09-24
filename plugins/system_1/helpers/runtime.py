@@ -18,6 +18,7 @@ PLUGIN = "system_1"
 _TURN_STATE = "_system_1_action_turn"
 _MAX_ACTIONS = 8
 _MAX_RESULT_CHARS = 4000
+_DECIDER_FIELDS = ("backend", "provider", "model", "endpoint", "token_env", "context_window")
 
 
 def _bounded_int(value, default: int, minimum: int, maximum: int) -> int:
@@ -122,6 +123,10 @@ async def _run_main_correction(agent, decision_state: str, timeout: float) -> di
     """Get advisory text from Main without tool execution or history writes."""
     from langchain_core.messages import HumanMessage, SystemMessage
 
+    detached = getattr(agent, "_system_1_detached_main_calls", None)
+    if isinstance(detached, set) and any(not task.done() for task in detached):
+        return None  # Do not accumulate uncancellable provider calls across turns.
+
     instruction = ("Reason about the uncertain part of this Agent Zero request. "
                    "System 1 may independently use tools while you think. Do not call tools, "
                    "claim tool execution, or assume newer tool results. Return only a JSON "
@@ -130,9 +135,16 @@ async def _run_main_correction(agent, decision_state: str, timeout: float) -> di
                    "no further tool result is needed.")
     messages = [SystemMessage(content=instruction),
                 HumanMessage(content=decision_state[:4000])]
+    call = asyncio.create_task(agent.call_chat_model(
+        messages=messages, background=True, explicit_caching=False))
     try:
-        response, _ = await asyncio.wait_for(agent.call_chat_model(
-            messages=messages, background=True, explicit_caching=False), timeout)
+        done, _ = await asyncio.wait({call}, timeout=timeout)
+        if not done:
+            _detach_main_call(agent, call)
+            return None
+        if call.cancelled():
+            return None
+        response, _ = call.result()
         parsed = json.loads(response)
         if not isinstance(parsed, dict) or parsed.get("kind") not in {"correction", "final"}:
             return None
@@ -140,8 +152,31 @@ async def _run_main_correction(agent, decision_state: str, timeout: float) -> di
         if not isinstance(answer, str) or not answer.strip() or len(answer) > 4000:
             return None
         return {"kind": parsed["kind"], "text": answer.strip()}
-    except (OSError, ValueError, TypeError, TimeoutError, KeyError):
+    except asyncio.CancelledError:
+        _detach_main_call(agent, call)
+        raise
+    except Exception:
         return None
+
+
+def _detach_main_call(agent, task: asyncio.Task) -> None:
+    """Retain at most one uncancellable call until it actually exits."""
+    detached = getattr(agent, "_system_1_detached_main_calls", None)
+    if not isinstance(detached, set):
+        detached = set()
+        setattr(agent, "_system_1_detached_main_calls", detached)
+    detached.add(task)
+    task.cancel()
+
+    def discard(done: asyncio.Task) -> None:
+        detached.discard(done)
+        if not done.cancelled():
+            try:
+                done.exception()
+            except Exception:
+                pass
+
+    task.add_done_callback(discard)
 
 
 def _take_main_result(state: dict) -> dict | None:
@@ -174,14 +209,75 @@ def delegation_action(role: str, goal: str) -> str:
         "role": role, "goal": goal[:8000]}}, separators=(",", ":"))
 
 
+def migrate_decider_config(config: dict) -> dict:
+    """Copy a compatible legacy connection to Decider without losing role settings.
+
+    Only enabled roles participate in conflict detection. Disabled legacy
+    defaults remain in place for rollback but never override the shared slot.
+    If two enabled roles disagree, preserve the old per-role behavior until a
+    user explicitly chooses the shared connection in the settings UI.
+    """
+    migrated = deepcopy(config)
+    if not isinstance(config, dict) or isinstance(config.get("decider"), dict):
+        return migrated
+    sections = [config.get(name) for name in ("main", "utility", "embedding")]
+    active = [item for item in sections if isinstance(item, dict) and item.get("enabled")]
+    candidates = active or [item for item in sections if isinstance(item, dict)]
+    connections = [{key: item[key] for key in _DECIDER_FIELDS if key in item}
+                   for item in candidates]
+    if connections and connections[0] and all(item == connections[0] for item in connections):
+        migrated["decider"] = deepcopy(connections[0])
+    return migrated
+
+
 def config_for(agent, section: str) -> tuple[dict, dict] | None:
     config = plugins.get_plugin_config(PLUGIN, agent)
     if not isinstance(config, dict):
         return None
+    config = migrate_decider_config(config)
     section_config = config.get(section)
     if not isinstance(section_config, dict) or not section_config.get("enabled"):
         return None
+    decider = config.get("decider")
+    if isinstance(decider, dict):
+        section_config = deepcopy(section_config)
+        for key in _DECIDER_FIELDS:
+            section_config.pop(key, None)
+        section_config.update({key: deepcopy(decider[key]) for key in _DECIDER_FIELDS
+                               if key in decider})
     return section_config, config.get("policy", {}) if isinstance(config.get("policy"), dict) else {}
+
+
+def bound_decision_state(state: str, choices: dict, context_window) -> str:
+    """Fail closed if a complete decision cannot fit the configured window.
+
+    Trimming can remove a Main correction, observed tool result, or exact Utility
+    request and cause a decision based on incomplete state.
+    """
+    if context_window in (None, "", 0):
+        return state
+    try:
+        window = int(context_window)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise DecisionError("Invalid Decider context window") from error
+    if not 1024 <= window <= 1_000_000:
+        raise DecisionError("Invalid Decider context window")
+    reserved = len(json.dumps(choices, ensure_ascii=False).encode("utf-8")) + 512
+    available = window - reserved
+    if available < 1:
+        raise DecisionError("Decider choices exceed context window")
+    if not state.strip() or len(state.encode("utf-8")) > available:
+        raise DecisionError("Decider state exceeds context window")
+    return state
+
+
+class ContextBoundClient:
+    def __init__(self, inner, context_window):
+        self.inner, self.context_window = inner, context_window
+
+    async def choose(self, state: str, choices: dict):
+        return await self.inner.choose(
+            bound_decision_state(state, choices, self.context_window), choices)
 
 
 def client_for(section_config: dict, policy: dict) -> DecisionClient:
@@ -193,11 +289,13 @@ def client_for(section_config: dict, policy: dict) -> DecisionClient:
     if backend in {"jev", "openrouter"} and not token:
         raise DecisionError(f"{backend} key is unavailable")
     if backend == "chat":
-        return ChatDecisionClient(section_config, policy)
-    return DecisionClient(backend=backend,
-                          model=section_config.get("model", ""),
-                          endpoint=section_config.get("endpoint", ""), token=token,
-                          timeout=float(policy.get("timeout_seconds", 2)))
+        inner = ChatDecisionClient(section_config, policy)
+    else:
+        inner = DecisionClient(backend=backend,
+                               model=section_config.get("model", ""),
+                               endpoint=section_config.get("endpoint", ""), token=token,
+                               timeout=float(policy.get("timeout_seconds", 2)))
+    return ContextBoundClient(inner, section_config.get("context_window"))
 
 
 class ChatDecisionClient:
@@ -222,7 +320,8 @@ class ChatDecisionClient:
         if not provider or not model_name or not 2 <= len(choices) <= 255:
             raise DecisionError("A provider, model, and finite choices are required")
         slot = {"provider": provider, "name": model_name,
-                "api_base": self.section_config.get("endpoint", "")}
+                "api_base": self.section_config.get("endpoint", ""),
+                "ctx_length": self.section_config.get("context_window") or 0}
         cfg = build_model_config(slot, models.ModelType.CHAT)
         model = models.get_chat_model(cfg.provider, cfg.name,
                                       model_config=cfg, **cfg.build_kwargs())
@@ -366,7 +465,8 @@ async def main_decision(agent) -> str | None:
         if len(choices) < 2:
             _complete(state)
             detail = ("Main advisory applied; no eligible choices" if state["main_guidance"]
-                      else "No eligible choices")
+                      else "Main advisory unavailable; remaining work handed to Main"
+                      if state["main_requested"] else "No eligible choices")
             finish_main_step(agent, "Handed off to Main", detail=detail)
             return None
     try:
@@ -423,7 +523,7 @@ async def main_decision(agent) -> str | None:
                         _complete(state)
                         finish_main_step(agent, "Handed off to Main", detail="Request or mode changed")
                         return None
-                    if result.choice == "wait_main" or task.done():
+                    if result.choice == "wait_main":
                         if not task.done():
                             try:
                                 await task

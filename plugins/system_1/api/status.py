@@ -2,9 +2,8 @@
 
 import os
 
-from helpers import plugins
 from helpers.api import ApiHandler, Request, Response
-from usr.plugins.system_1.helpers.runtime import client_for
+from usr.plugins.system_1.helpers.runtime import client_for, config_for
 
 
 class Status(ApiHandler):
@@ -12,11 +11,10 @@ class Status(ApiHandler):
         section = input.get("section", "main")
         if section not in {"main", "utility", "embedding"}:
             return Response(status=400, response="Unknown model section")
-        config = plugins.get_plugin_config("system_1") or {}
-        section_config = config.get(section, {})
-        policy = config.get("policy", {})
-        if not section_config.get("enabled"):
+        settings = config_for(None, section)
+        if not settings:
             return {"ok": True, "status": "disabled"}
+        section_config, policy = settings
         env_name = section_config.get("token_env", "")
         if section_config.get("backend") == "jev" and not os.environ.get(env_name, ""):
             return {"ok": True, "status": "unavailable", "detail": "Credential is missing"}

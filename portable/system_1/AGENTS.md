@@ -23,6 +23,13 @@
 - OpenRouter Jev uses the Decisions API and its shared Agent Zero provider key.
   Native chat providers may route, but their self-reported confidence never
   authorizes direct fixed action dispatch.
+- One Decider connection supplies every enabled Main, Utility, and Embedding
+  System One Mode. Keep those role toggles independent. Migrate matching legacy
+  per-role connections without discarding them; conflicting enabled connections
+  require an explicit shared choice. Bound complete request state using the
+  configured Decider context window while reserving room for choices and output.
+  Reject oversized state rather than dropping a correction, tool result, or
+  Utility message.
 - Embedding vectors remain the host embedding model's output.
 - Utility fixed responses require an explicit exact system/message route and a
   predeclared finite response. A guarded model wrapper must preserve the host
@@ -36,7 +43,10 @@
 - Main correction begins only for an uncertain subtask. While it is pending,
   System 1 may dispatch only explicitly opted-in independent actions through
   the host. Recheck the request and configuration before accepting later advice;
-  stale advice must not commit an action or overwrite a newer result.
+  stale advice must not commit an action or overwrite a newer result. An advisory
+  deadline must return even if its underlying model call ignores cancellation.
+  Retain at most one such unfinished advisory call per agent; skip new advice
+  until it exits, and never apply a late result.
 - On Agent Zero, the first model turn is loop iteration zero. A later
   iteration can make another System 1 decision only after an observed result
   from its pending tool, within the action cap; other iterations belong to Main.

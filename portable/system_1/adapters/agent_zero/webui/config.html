@@ -42,9 +42,9 @@
       finally { this.busy = false; }
     } }" x-init="config.policy.max_actions_per_turn ??= 3; config.policy.max_result_chars ??= 2000; config.utility.fixed_routes ??= []">
     <div class="section-title">System 1</div>
-    <div class="section-description">Finite-choice decisions use the selected backend. Agent Zero still validates and executes actions.</div>
+    <div class="section-description">Finite-choice decisions use the shared Decider Model. Agent Zero still validates and executes actions.</div>
     <div class="field">
-      <div class="field-label"><div class="field-title">Backend status</div><div class="field-description">Checks the selected decision service on request.</div></div>
+      <div class="field-label"><div class="field-title">Decider status</div><div class="field-description">Checks the shared decision service for the selected enabled mode.</div></div>
       <div class="field-control system-one-status-control"><select x-model="section"><option value="main">Main</option><option value="utility">Utility</option><option value="embedding">Embedding</option></select><button type="button" @click="check()" :disabled="busy">Check connection</button><span role="status" aria-live="polite" x-text="busy ? 'Checking…' : status"></span></div>
     </div>
     <div class="field">

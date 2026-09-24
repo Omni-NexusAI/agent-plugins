@@ -1,22 +1,17 @@
+decider:
+  backend: jev
+  provider: jev
+  model: jev-latest
+  endpoint: https://api.typesafe.ai/v1/systemone
+  token_env: SYSTEM_1_JEV_API_KEY
+  context_window: 8192
 main:
   enabled: false
-  backend: jev
-  model: jev-latest
-  endpoint: https://api.typesafe.ai/v1/systemone
-  token_env: SYSTEM_1_JEV_API_KEY
 utility:
   enabled: false
-  backend: jev
-  model: jev-latest
-  endpoint: https://api.typesafe.ai/v1/systemone
-  token_env: SYSTEM_1_JEV_API_KEY
   fixed_routes: []
 embedding:
   enabled: false
-  backend: jev
-  model: jev-latest
-  endpoint: https://api.typesafe.ai/v1/systemone
-  token_env: SYSTEM_1_JEV_API_KEY
 policy:
   preset: balanced
   min_choice_probability: 0.85

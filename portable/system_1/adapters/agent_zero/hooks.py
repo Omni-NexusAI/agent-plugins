@@ -1,9 +1,23 @@
 """Remove UI drafts and validate safety-critical settings before persistence."""
 
 
+def get_plugin_config(default=None, **kwargs):
+    from usr.plugins.system_1.helpers.runtime import migrate_decider_config
+
+    return migrate_decider_config(default or {})
+
+
 def save_plugin_config(result=None, settings=None, **kwargs):
     if not isinstance(settings, dict):
         return settings
+    decider = settings.get("decider")
+    if isinstance(decider, dict):
+        context_window = decider.get("context_window")
+        if context_window not in (None, "") and (
+            isinstance(context_window, bool) or not isinstance(context_window, int)
+            or not 1024 <= context_window <= 1_000_000
+        ):
+            raise ValueError("Decider context window must be 1024 to 1000000 tokens")
     utility = settings.get("utility")
     if isinstance(utility, dict):
         utility.pop("_fixed_routes_json", None)

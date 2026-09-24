@@ -306,6 +306,43 @@ class RoutingTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_finished_main_does_not_override_independent_jev_action(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        self.config["policy"]["actions"] = {
+            "independent": {"tool_name": "memory_load", "tool_args": {"query": "independent"},
+                            "independent_while_main": True,
+                            "share_result_with_backend": True},
+            "dependent": {"tool_name": "memory_load", "tool_args": {"query": "dependent"}},
+        }
+        states = []
+
+        async def correction(agent, decision_state, timeout):
+            return {"kind": "correction", "text": "Use the verified next step."}
+
+        async def decide(state, choices):
+            states.append(state)
+            if len(states) == 2:
+                await asyncio.sleep(0)  # Main finishes before Jev returns its action.
+            selected = {1: "main", 2: "independent", 3: "dependent"}[len(states)]
+            return types.SimpleNamespace(choice=selected, confidence=0.99, backend="jev")
+
+        self.runtime._run_main_correction = correction
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+
+        async def scenario():
+            first = await self.runtime.main_decision(agent)
+            self.assertEqual(json.loads(first)["tool_args"]["query"], "independent")
+            self.assertTrue(self.runtime.record_host_result(agent, "memory_load", "Observed fact"))
+            agent.loop_data.iteration = 1
+            second = await self.runtime.main_decision(agent)
+            self.assertEqual(json.loads(second)["tool_args"]["query"], "dependent")
+            self.assertIn("verified next step", states[2])
+
+        asyncio.run(scenario())
+
     def test_no_independent_action_uses_normal_main_without_background_call(self):
         self.config["policy"]["action_precedence"] = "main_first"
         self.config["policy"]["actions"] = {
@@ -426,6 +463,50 @@ class RoutingTests(unittest.TestCase):
         self.assertTrue(seen[0]["background"])
         self.assertFalse(seen[0]["explicit_caching"])
         self.assertEqual(seen[0]["messages"][1], ("human", "Uncertain subtask"))
+
+    def test_main_correction_timeout_does_not_wait_for_uncancellable_model(self):
+        messages = types.ModuleType("langchain_core.messages")
+        messages.SystemMessage = lambda content: ("system", content)
+        messages.HumanMessage = lambda content: ("human", content)
+        parent = types.ModuleType("langchain_core")
+        class SlowAgent:
+            def __init__(self):
+                self.release = asyncio.Event()
+                self.cancel_seen = False
+                self.calls = 0
+
+            async def call_chat_model(self, **kwargs):
+                self.calls += 1
+                if self.calls > 1:
+                    return ('{"kind":"correction","text":"fresh"}', "")
+                try:
+                    await asyncio.Future()
+                except asyncio.CancelledError:
+                    self.cancel_seen = True
+                    await self.release.wait()
+                    return ('{"kind":"correction","text":"stale"}', "")
+
+        async def scenario():
+            agent = SlowAgent()
+            with patch.dict(sys.modules, {"langchain_core": parent,
+                                          "langchain_core.messages": messages}):
+                result = await asyncio.wait_for(
+                    self.runtime._run_main_correction(agent, "Uncertain", 0.01), 0.2)
+                self.assertIsNone(result)
+                await asyncio.sleep(0)
+                self.assertTrue(agent.cancel_seen)
+                self.assertIsNone(await self.runtime._run_main_correction(
+                    agent, "Another uncertain subtask", 0.01))
+                self.assertEqual(agent.calls, 1)
+                agent.release.set()
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+                self.assertEqual(await self.runtime._run_main_correction(
+                    agent, "New uncertain subtask", 0.1),
+                    {"kind": "correction", "text": "fresh"})
+                self.assertEqual(agent.calls, 2)
+
+        asyncio.run(scenario())
 
     def test_disable_while_waiting_cannot_commit_stale_main_final(self):
         self.config["policy"]["action_precedence"] = "main_first"
