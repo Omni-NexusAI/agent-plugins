@@ -24,6 +24,15 @@ class ActionConfigTests(unittest.TestCase):
             "known": {"tool_name": "known_tool", "tool_args": {"query": "fixed"}}}}}
         self.assertIs(HOOKS.save_plugin_config(settings=settings), settings)
 
+    def test_parallel_batching_requires_a_separate_explicit_safety_opt_in(self):
+        action = {"tool_name": "known_tool", "tool_args": {"query": "fixed"},
+                  "independent_while_main": True, "parallel_safe": True}
+        settings = {"policy": {"actions": {"known": action}}}
+        self.assertIs(HOOKS.save_plugin_config(settings=settings), settings)
+        action["parallel_safe"] = "true"
+        with self.assertRaises(ValueError):
+            HOOKS.save_plugin_config(settings=settings)
+
     def test_main_control_ids_cannot_be_actions(self):
         for key in ("main", "finish", "wait_main"):
             with self.subTest(key=key):

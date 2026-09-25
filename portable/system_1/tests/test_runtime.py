@@ -30,14 +30,22 @@ class RoutingTests(unittest.TestCase):
         timeline = types.ModuleType("usr.plugins.system_1.helpers.timeline")
         self.timeline_events = []
         timeline.finish_main_step = lambda *args, **kwargs: self.timeline_events.append((args, kwargs))
+        timeline.record_main_event = lambda *args, **kwargs: self.timeline_events.append((args, kwargs))
         tool_availability = types.ModuleType("usr.plugins.system_1.helpers.tool_availability")
         tool_availability.is_tool_available = lambda agent, tool_name: True
+        parallel_source = (Path(__file__).resolve().parents[1] / "adapters" / "agent_zero" /
+                           "helpers" / "parallel_results.py")
+        parallel_spec = importlib.util.spec_from_file_location(
+            "usr.plugins.system_1.helpers.parallel_results", parallel_source)
+        parallel_results = importlib.util.module_from_spec(parallel_spec)
+        parallel_spec.loader.exec_module(parallel_results)
         auxiliary = types.ModuleType("usr.plugins.auxiliary_model_roles.helpers.runtime")
         auxiliary.available_roles = lambda agent: {"tool": {"enabled": True}}
         self.modules = patch.dict(sys.modules, {"helpers": helpers, core.__name__: core,
-                                                decision.__name__: decision, timeline.__name__: timeline,
-                                                tool_availability.__name__: tool_availability,
-                                                auxiliary.__name__: auxiliary})
+                                                 decision.__name__: decision, timeline.__name__: timeline,
+                                                 tool_availability.__name__: tool_availability,
+                                                 parallel_results.__name__: parallel_results,
+                                                 auxiliary.__name__: auxiliary})
         self.modules.start()
         spec = importlib.util.spec_from_file_location("system_one_runtime_test", SOURCE)
         self.runtime = importlib.util.module_from_spec(spec)
@@ -87,6 +95,26 @@ class RoutingTests(unittest.TestCase):
         self.config["policy"]["actions"]["lookup"] = {
             "tool_name": "memory_load", "tool_args": {"query": "changed"}}
         self.assertEqual(self.runtime.main_handoff_note(agent), "")
+
+    def test_main_handoff_includes_bounded_permitted_host_evidence(self):
+        action = {"tool_name": "github_mcp_server.get_pull_request_status",
+                  "tool_args": {"pull_number": 11},
+                  "share_result_with_backend": True}
+        self.config["policy"]["actions"] = {"status": action}
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=2)
+        state = self.runtime._turn_state(agent, create=True)
+        state["complete"] = True
+        state["observations"].append({
+            "action_id": "status", "action_definition": action,
+            "tool_name": action["tool_name"],
+            "result": "observed-status-" + "x" * 2000,
+            "truncated": False,
+        })
+        note = self.runtime.main_handoff_note(agent)
+        self.assertIn("observed-status-", note)
+        self.assertIn('"truncated":true', note)
+        self.assertNotIn("x" * 1201, note)
 
     def test_oversized_main_advisory_is_not_sent_truncated(self):
         agent = Agent()
@@ -843,6 +871,775 @@ class RoutingTests(unittest.TestCase):
         self.assertIsNone(asyncio.run(self.runtime.main_decision(Agent())))
         self.assertEqual(calls, 3)
         self.assertEqual(self.timeline_events[-1][1]["detail"], "Main correction became stale")
+
+    def test_main_proposal_rechecks_current_action_and_records_ownership(self):
+        """Main may select only a still-configured host action, never arguments."""
+        chosen = {"tool_name": "memory_load", "tool_args": {"query": "verified"}}
+        self.config["policy"]["actions"] = {"chosen": chosen}
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        state["main_proposal"] = {"kind": "action", "action_id": "chosen"}
+        state["main_offered_actions"] = {"chosen": dict(chosen)}
+
+        action = self.runtime._main_proposal_action(
+            agent, state, self.config["policy"], "Inspect this page")
+
+        self.assertEqual(json.loads(action), chosen)
+        self.assertEqual(state["owner"], "main")
+        self.assertEqual(state["used_action_ids"], {"chosen"})
+        self.assertEqual(state["pending"]["action_id"], "chosen")
+        self.assertTrue(any(event[0][1] == "main_action" for event in self.timeline_events))
+
+    def test_stale_main_proposal_cannot_dispatch_or_replay_a_changed_action(self):
+        chosen = {"tool_name": "memory_load", "tool_args": {"query": "before"}}
+        self.config["policy"]["actions"] = {"chosen": chosen}
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        state["main_proposal"] = {"kind": "action", "action_id": "chosen"}
+        state["main_offered_actions"] = {"chosen": dict(chosen)}
+        self.config["policy"]["actions"]["chosen"] = {
+            "tool_name": "memory_load", "tool_args": {"query": "after"}}
+
+        self.assertIsNone(self.runtime._main_proposal_action(
+            agent, state, self.config["policy"], "Inspect this page"))
+        self.assertTrue(state["main_stale"])
+        self.assertEqual(state["used_action_ids"], set())
+        self.assertIsNone(state["pending"])
+
+    def test_host_main_delegation_accepts_only_current_unique_eligible_ids(self):
+        first = {"tool_name": "memory_load", "tool_args": {"query": "first"}}
+        second = {"tool_name": "memory_load", "tool_args": {"query": "second"}}
+        self.config["policy"]["actions"] = {"first": first, "second": second}
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        state.update({"complete": True, "owner": "main"})
+
+        self.assertFalse(self.runtime.record_main_delegation(agent, ["first", "first"]))
+        self.assertFalse(self.runtime.record_main_delegation(agent, ["missing"]))
+        self.assertTrue(self.runtime.record_main_delegation(agent, ["second"]))
+        self.assertEqual(state["main_delegate_ids"], frozenset({"second"}))
+        self.assertTrue(state["delegate_pending"])
+        self.assertEqual(state["owner"], "system_1")
+        self.assertTrue(any(event[0][1] == "main_delegate" for event in self.timeline_events))
+
+    def test_main_delegation_limits_the_next_system1_choice_to_its_current_subset(self):
+        selected = {"tool_name": "memory_load", "tool_args": {"query": "selected"}}
+        excluded = {"tool_name": "memory_load", "tool_args": {"query": "excluded"}}
+        self.config["policy"]["actions"] = {"selected": selected, "excluded": excluded}
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        state = self.runtime._turn_state(agent, create=True)
+        state.update({"complete": True, "owner": "main"})
+        self.assertTrue(self.runtime.record_main_delegation(agent, ["selected"]))
+        agent.loop_data.iteration = 1
+        offered = []
+
+        async def decide(_state, choices):
+            offered.append(set(choices))
+            return types.SimpleNamespace(choice="selected", confidence=0.99, backend="jev")
+
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        action = asyncio.run(self.runtime.main_decision(agent))
+
+        self.assertEqual(json.loads(action), selected)
+        self.assertEqual(offered, [{"main", "selected"}])
+        self.assertEqual(state["used_action_ids"], {"selected"})
+
+    def test_delegated_decider_receives_prior_evidence_and_explicit_main_context(self):
+        skills = {"tool_name": "skills_tool", "tool_args": {"action": "search", "query": "system_1"},
+                  "share_result_with_backend": True}
+        pr_status = {"tool_name": "github_mcp_server.get_pull_request_status",
+                     "tool_args": {"owner": "Omni-NexusAI", "repo": "agent-plugins", "pull_number": 11}}
+        self.config["policy"]["actions"] = {"skills_check": skills, "pr_status": pr_status}
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        state = self.runtime._turn_state(agent, create=True)
+        state.update({"complete": True, "owner": "main", "used_action_ids": {"skills_check"},
+                      "actions_submitted": 1})
+        state["observations"].append({
+            "action_id": "skills_check", "action_definition": dict(skills),
+            "tool_name": "skills_tool", "result": "skills evidence", "return_result": "",
+            "binding_result": "", "truncated": False,
+        })
+        self.assertTrue(self.runtime.record_main_delegation(agent, ["pr_status"]))
+        agent.loop_data.iteration = 1
+        calls = []
+
+        async def decide(decision_state, choices):
+            calls.append((decision_state, dict(choices)))
+            return types.SimpleNamespace(choice="pr_status", confidence=0.99, backend="jev")
+
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, choices, threshold: choices.get(result.choice)
+        action = asyncio.run(self.runtime.main_decision(agent))
+
+        self.assertEqual(json.loads(action), pr_status)
+        self.assertEqual(set(calls[0][1]), {"main", "pr_status"})
+        self.assertEqual(list(calls[0][1]), ["pr_status", "main"])
+        self.assertIn("Original request: Inspect this page", calls[0][0])
+        self.assertIn("Prior choice: skills_check", calls[0][0])
+        self.assertIn("Observed result: skills evidence", calls[0][0])
+        self.assertIn("Main delegation:", calls[0][0])
+        self.assertIn("pr_status", calls[0][0])
+        self.assertTrue(calls[0][0].startswith("Main delegation:"))
+
+    def test_main_can_decline_a_delegated_choice_without_a_host_dispatch(self):
+        selected = {"tool_name": "memory_load", "tool_args": {"query": "delegated"}}
+        self.config["policy"]["actions"] = {"selected": selected}
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        state = self.runtime._turn_state(agent, create=True)
+        state.update({"complete": True, "owner": "main"})
+        self.assertTrue(self.runtime.record_main_delegation(agent, ["selected"]))
+        agent.loop_data.iteration = 1
+
+        async def decide(_state, choices):
+            self.assertIn("main", choices)
+            return types.SimpleNamespace(choice="main", confidence=0.99, backend="jev")
+
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertTrue(state["complete"])
+        self.assertEqual(state["owner"], "main")
+        self.assertEqual(state["used_action_ids"], set())
+        self.assertIsNone(state["pending"])
+        self.assertEqual(self.timeline_events[-1][1]["detail"],
+                         "System 1 declined Main delegation")
+        note = self.runtime.main_handoff_note(agent)
+        self.assertIn("did not submit or execute a System 1 action", note)
+        self.assertIn("ordinary Agent Zero tool", note)
+        self.assertIn("report that it is unavailable", note)
+        self.assertIn("Do not claim the delegated action ran", note)
+
+    def test_repeated_identical_main_delegation_requires_fresh_evidence(self):
+        selected = {"tool_name": "memory_load", "tool_args": {"query": "delegated"}}
+        self.config["policy"]["actions"] = {"selected": selected}
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        state.update({"complete": True, "owner": "main"})
+
+        self.assertTrue(self.runtime.record_main_delegation(agent, ["selected"]))
+        state.update({"complete": True, "owner": "main", "delegate_pending": False,
+                      "observation": None})
+        self.assertFalse(self.runtime.record_main_delegation(agent, ["selected"]))
+
+    def test_fresh_host_evidence_allows_a_new_identical_main_delegation(self):
+        selected = {"tool_name": "github_mcp_server.get_pull_request_status",
+                    "tool_args": {"owner": "Omni-NexusAI", "repo": "agent-plugins", "pull_number": 11}}
+        self.config["policy"]["actions"] = {"selected": selected}
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        state.update({"complete": True, "owner": "main"})
+
+        self.assertTrue(self.runtime.record_main_delegation(agent, ["selected"]))
+        state.update({"complete": True, "owner": "main", "delegate_pending": False,
+                      "observation": None})
+        self.assertTrue(self.runtime.record_main_host_action(
+            agent, "memory_load", {"query": "fresh host observation"}))
+        self.assertTrue(self.runtime.record_main_delegation(agent, ["selected"]))
+
+    def test_low_confidence_delegated_choice_returns_to_main_without_dispatch(self):
+        selected = {"tool_name": "memory_load", "tool_args": {"query": "delegated"}}
+        self.config["policy"].update({"min_choice_probability": 0.9,
+                                       "actions": {"selected": selected}})
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        state = self.runtime._turn_state(agent, create=True)
+        state.update({"complete": True, "owner": "main"})
+        self.assertTrue(self.runtime.record_main_delegation(agent, ["selected"]))
+        agent.loop_data.iteration = 1
+
+        async def decide(_state, _choices):
+            return types.SimpleNamespace(choice="selected", confidence=0.89, backend="jev")
+
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertTrue(state["complete"])
+        self.assertEqual(state["owner"], "main")
+        self.assertEqual(state["used_action_ids"], set())
+        self.assertIsNone(state["pending"])
+
+    def test_oversized_delegated_decider_state_hands_back_without_partial_context(self):
+        selected = {"tool_name": "memory_load", "tool_args": {"query": "delegated"},
+                    "share_result_with_backend": True}
+        self.config["policy"].update({"max_state_chars": 256, "actions": {"selected": selected}})
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        state = self.runtime._turn_state(agent, create=True)
+        state.update({"complete": True, "owner": "main"})
+        state["observations"].append({
+            "action_id": "selected", "action_definition": dict(selected),
+            "tool_name": "memory_load", "result": "evidence " * 200,
+            "return_result": "", "binding_result": "", "truncated": False,
+        })
+        # A distinct still-eligible action is delegated; the large prior result
+        # must make the complete bounded state fail closed before Jev is called.
+        other = {"tool_name": "memory_load", "tool_args": {"query": "other"}}
+        self.config["policy"]["actions"]["other"] = other
+        self.assertTrue(self.runtime.record_main_delegation(agent, ["other"]))
+        agent.loop_data.iteration = 1
+        calls = []
+
+        async def decide(*args):
+            calls.append(args)
+            raise AssertionError("oversized delegated state reached Jev")
+
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertEqual(calls, [])
+        self.assertTrue(state["complete"])
+        self.assertEqual(state["owner"], "main")
+        self.assertIsNone(state["pending"])
+
+    def test_unavailable_host_tool_cannot_be_delegated_or_dispatched(self):
+        denied = {"tool_name": "github_mcp_server.get_pull_request_status",
+                  "tool_args": {"owner": "Omni-NexusAI", "repo": "agent-plugins", "pull_number": 11}}
+        self.config["policy"]["actions"] = {"denied": denied}
+        self.runtime.is_tool_available = lambda agent, name: False
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        state.update({"complete": True, "owner": "main"})
+
+        self.assertFalse(self.runtime.record_main_delegation(agent, ["denied"]))
+        state.update({"complete": False, "owner": "system_1", "observation": {"delegation": True},
+                      "delegate_pending": True})
+        agent.loop_data.iteration = 1
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertIsNone(state["pending"])
+        self.assertNotIn("denied", state["used_action_ids"])
+
+    def test_main_cannot_delegate_a_call_already_executed_by_system1(self):
+        repeated = {"tool_name": "memory_load", "tool_args": {"query": "already ran"}}
+        self.config["policy"]["actions"] = {"repeated": repeated}
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        state.update({"complete": True, "owner": "main", "used_action_ids": {"repeated"}})
+
+        self.assertFalse(self.runtime.record_main_delegation(agent, ["repeated"]))
+        self.assertFalse(state["delegate_pending"])
+        self.assertIsNone(state["main_delegate_ids"])
+
+    def test_main_host_action_record_prevents_a_later_delegated_replay(self):
+        call = {"tool_name": "memory_load", "tool_args": {"query": "already ran"}}
+        self.config["policy"]["actions"] = {"repeated": dict(call)}
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        state.update({"complete": True, "owner": "main"})
+
+        self.assertTrue(self.runtime.record_main_host_action(
+            agent, call["tool_name"], call["tool_args"]))
+        self.assertFalse(self.runtime.record_main_delegation(agent, ["repeated"]))
+        self.assertFalse(self.runtime.record_main_host_action(
+            agent, call["tool_name"], call["tool_args"], succeeded=False))
+
+    def test_main_action_result_stays_with_main_until_explicit_later_delegation(self):
+        main_action = {"tool_name": "memory_load", "tool_args": {"query": "main action"}}
+        follow_up = {"tool_name": "memory_load", "tool_args": {"query": "follow up"}}
+        self.config["policy"]["actions"] = {"main_action": main_action, "follow_up": follow_up}
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        state = self.runtime._turn_state(agent, create=True)
+        state.update({
+            "owner": "main",
+            "used_action_ids": {"main_action"},
+            "pending": {
+                "action_id": "main_action", "tool_name": "memory_load",
+                "action_definition": dict(main_action), "share_result": False,
+                "bind_result": False, "return_result": False, "result_limit": 2000,
+            },
+        })
+
+        self.assertTrue(self.runtime.record_host_result(agent, "memory_load", "main result"))
+        self.assertTrue(state["complete"])
+        self.assertFalse(self.runtime.should_decide(agent))
+
+        self.assertTrue(self.runtime.record_main_delegation(agent, ["follow_up"]))
+        agent.loop_data.iteration = 1
+        self.assertTrue(self.runtime.should_decide(agent))
+
+    def test_parallel_start_is_not_recorded_as_a_completed_main_call(self):
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+
+        self.assertFalse(self.runtime.record_main_host_action(
+            agent, "parallel", {"tool_calls": []}, succeeded=True))
+        self.assertEqual(state.get("call_signatures", set()), set())
+
+    def test_main_owned_parallel_pending_children_block_duplicate_system1_handback(self):
+        alpha = {"tool_name": "memory_load", "tool_args": {"query": "alpha"}}
+        bravo = {"tool_name": "memory_load", "tool_args": {"query": "bravo"}}
+        self.config["policy"]["actions"] = {
+            "alpha": alpha, "bravo": bravo,
+            "replay_alpha": dict(alpha), "replay_bravo": dict(bravo),
+        }
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(
+            iteration=0,
+            current_tool=types.SimpleNamespace(name="parallel", args={"tool_calls": [
+                {"tool_name": "memory_load", "tool_args": {"query": "alpha"}},
+                {"tool_name": "memory_load", "tool_args": {"query": "bravo"}},
+            ], "wait": False}),
+        )
+        state = self.runtime._turn_state(agent, create=True)
+        state.update({"owner": "main", "actions_submitted": 2,
+                      "used_action_ids": {"alpha", "bravo"},
+                      "pending": {"tool_name": "parallel", "wait": False, "job_ids": [], "batch": [
+                          {"action_id": "alpha", "tool_name": "memory_load",
+                           "action_definition": alpha, "share_result": False, "bind_result": False,
+                           "return_result": False, "result_limit": 2000},
+                          {"action_id": "bravo", "tool_name": "memory_load",
+                           "action_definition": bravo, "share_result": False, "bind_result": False,
+                           "return_result": False, "result_limit": 2000},
+                      ]}})
+        started = json.dumps({"status": "started", "jobs": [
+            {"job_id": "alpha-job", "tool_name": "memory_load", "state": "running"},
+            {"job_id": "bravo-job", "tool_name": "memory_load", "state": "pending"},
+        ]})
+
+        self.assertFalse(self.runtime.record_host_result(agent, "parallel", started))
+        self.assertTrue(state["complete"])
+        self.assertEqual(state["owner"], "main")
+        self.assertFalse(self.runtime.record_main_delegation(agent, ["replay_alpha"]))
+        self.assertFalse(self.runtime.record_main_delegation(agent, ["replay_bravo"]))
+
+    def test_malformed_initial_main_parallel_mapping_keeps_every_child_unresolved(self):
+        alpha = {"tool_name": "memory_load", "tool_args": {"query": "alpha"}}
+        bravo = {"tool_name": "memory_load", "tool_args": {"query": "bravo"}}
+        self.config["policy"]["actions"] = {
+            "replay_alpha": dict(alpha), "replay_bravo": dict(bravo)}
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(
+            iteration=0,
+            current_tool=types.SimpleNamespace(name="parallel", args={"tool_calls": [
+                {"tool_name": "memory_load", "tool_args": {"query": "alpha"}},
+                {"tool_name": "memory_load", "tool_args": {"query": "bravo"}},
+            ], "wait": False}),
+        )
+        state = self.runtime._turn_state(agent, create=True)
+        state.update({"complete": True, "owner": "main"})
+        malformed = json.dumps({"status": "started", "jobs": [
+            {"job_id": "alpha-job", "tool_name": "memory_load", "state": "running"},
+        ]})
+
+        self.assertFalse(self.runtime.record_host_result(agent, "parallel", malformed))
+        self.assertFalse(self.runtime.record_main_delegation(agent, ["replay_alpha"]))
+        self.assertFalse(self.runtime.record_main_delegation(agent, ["replay_bravo"]))
+        self.assertNotIn("alpha-job", repr(state))
+
+    def test_main_parallel_success_blocks_replay_but_failed_child_allows_safe_retry(self):
+        alpha = {"tool_name": "memory_load", "tool_args": {"query": "alpha"}}
+        bravo = {"tool_name": "memory_load", "tool_args": {"query": "bravo"}}
+        self.config["policy"]["actions"] = {
+            "alpha": alpha, "bravo": bravo,
+            "replay_alpha": dict(alpha), "retry_bravo": dict(bravo),
+        }
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(
+            iteration=0,
+            current_tool=types.SimpleNamespace(name="parallel", args={"tool_calls": [
+                {"tool_name": "memory_load", "tool_args": {"query": "alpha"}},
+                {"tool_name": "memory_load", "tool_args": {"query": "bravo"}},
+            ], "wait": False}),
+        )
+        state = self.runtime._turn_state(agent, create=True)
+        state.update({"owner": "main", "actions_submitted": 2,
+                      "used_action_ids": {"alpha", "bravo"},
+                      "pending": {"tool_name": "parallel", "wait": False,
+                                  "job_ids": [], "batch": [
+                          {"action_id": "alpha", "tool_name": "memory_load",
+                           "action_definition": alpha, "share_result": False, "bind_result": False,
+                           "return_result": False, "result_limit": 2000},
+                          {"action_id": "bravo", "tool_name": "memory_load",
+                           "action_definition": bravo, "share_result": False, "bind_result": False,
+                           "return_result": False, "result_limit": 2000},
+                      ]}})
+        started = json.dumps({"status": "started", "jobs": [
+            {"job_id": "alpha-job", "tool_name": "memory_load", "state": "running"},
+            {"job_id": "bravo-job", "tool_name": "memory_load", "state": "pending"},
+        ]})
+        mixed = json.dumps({"status": "partial", "jobs": [
+            {"job_id": "main-job", "tool_name": "code_execution_tool", "state": "success",
+             "result": "Main-only content"},
+            {"job_id": "bravo-job", "tool_name": "memory_load", "state": "error",
+             "error": "denied"},
+            {"job_id": "alpha-job", "tool_name": "memory_load", "state": "success",
+             "result": "alpha result"},
+        ]})
+
+        self.assertFalse(self.runtime.record_host_result(agent, "parallel", started))
+        agent.loop_data.current_tool.args = {"action": "await",
+                                              "job_ids": ["alpha-job", "bravo-job"]}
+        self.assertTrue(self.runtime.record_host_result(agent, "parallel", mixed))
+        self.assertIsNone(state["pending"])
+        self.assertTrue(state["complete"])
+        self.assertEqual(state["owner"], "main")
+        self.assertNotIn("Main-only content", repr(state))
+        self.assertFalse(self.runtime.record_main_delegation(agent, ["replay_alpha"]))
+        self.assertTrue(self.runtime.record_main_delegation(agent, ["retry_bravo"]))
+
+    def test_distinct_action_ids_cannot_replay_the_same_host_call(self):
+        call = {"tool_name": "memory_load", "tool_args": {"query": "same call"}}
+        self.config["policy"]["actions"] = {"first": dict(call), "second": dict(call)}
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=1)
+        state = self.runtime._turn_state(agent, create=True)
+        state["used_action_ids"].add("first")
+        state["observation"] = {"action_id": "first", "tool_name": "memory_load",
+                                "action_definition": dict(call), "result": "",
+                                "return_result": "", "binding_result": "", "truncated": False}
+
+        async def decide(_state, _choices):
+            return types.SimpleNamespace(choice="second", confidence=0.99, backend="jev")
+
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertEqual(state["used_action_ids"], {"first"})
+        self.assertIsNone(state["pending"])
+
+    def test_parallel_batch_requires_both_safety_opt_ins_and_uses_native_shape(self):
+        alpha = {"tool_name": "memory_load", "tool_args": {"query": "alpha"},
+                 "independent_while_main": True, "parallel_safe": True}
+        bravo = {"tool_name": "memory_load", "tool_args": {"query": "bravo"},
+                 "independent_while_main": True, "parallel_safe": True}
+        dependent = {"tool_name": "memory_load", "tool_args": {"query": "dependent"}}
+        self.config["policy"]["actions"] = {
+            "alpha": alpha, "bravo": bravo, "dependent": dependent}
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        state["main_requested"] = True
+        chosen = []
+
+        async def decide(_state, choices):
+            chosen.append(set(choices))
+            return types.SimpleNamespace(choice="bravo", confidence=0.99, backend="jev")
+
+        client = types.SimpleNamespace(choose=decide)
+        batch = asyncio.run(self.runtime._maybe_batch_independent(
+            agent, state, client, "Inspect this page", self.config["policy"]["actions"],
+            "alpha", self.config["policy"], "Inspect this page", 0.85))
+
+        self.assertEqual(json.loads(batch), {
+            "tool_name": "parallel",
+            "tool_args": {"tool_calls": [
+                {"tool_name": "memory_load", "tool_args": {"query": "alpha"}},
+                {"tool_name": "memory_load", "tool_args": {"query": "bravo"}},
+            ], "wait": False},
+        })
+        self.assertEqual(chosen, [{"batch_stop", "bravo"}])
+        self.assertEqual(state["used_action_ids"], {"alpha", "bravo"})
+        self.assertNotIn("dependent", state["used_action_ids"])
+        self.assertEqual(state["pending"]["tool_name"], "parallel")
+        self.assertFalse(state["pending"]["wait"])
+        self.assertEqual(state["owner"], "main")
+        self.assertTrue(any(event[0][1] == "parallel_started" for event in self.timeline_events))
+
+    def test_parallel_wait_policy_requires_terminal_job_results_before_next_s1_decision(self):
+        actions = {
+            key: {"tool_name": "memory_load", "tool_args": {"query": key},
+                  "independent_while_main": True, "parallel_safe": True}
+            for key in ("alpha", "bravo")
+        }
+        self.config["policy"].update({"actions": actions, "parallel_wait_for_results": True})
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        state["main_requested"] = True
+
+        async def decide(_state, _choices):
+            return types.SimpleNamespace(choice="bravo", confidence=0.99, backend="jev")
+
+        batch = asyncio.run(self.runtime._maybe_batch_independent(
+            agent, state, types.SimpleNamespace(choose=decide), "Inspect this page", actions,
+            "alpha", self.config["policy"], "Inspect this page", 0.85))
+
+        self.assertTrue(json.loads(batch)["tool_args"]["wait"])
+        self.assertTrue(state["pending"]["wait"])
+        self.assertEqual(state["owner"], "system_1")
+
+    def test_independent_batch_can_run_before_main_is_requested(self):
+        actions = {key: {"tool_name": "memory_load", "tool_args": {"query": key},
+                         "independent_while_main": True, "parallel_safe": True}
+                   for key in ("alpha", "bravo")}
+        self.config["policy"]["actions"] = actions
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+
+        async def decide(_state, _choices):
+            return types.SimpleNamespace(choice="bravo", confidence=0.99, backend="jev")
+
+        batch = asyncio.run(self.runtime._maybe_batch_independent(
+            agent, state, types.SimpleNamespace(choose=decide), "Inspect this page", actions,
+            "alpha", self.config["policy"], "Inspect this page", 0.85))
+
+        self.assertTrue(json.loads(batch)["tool_args"]["wait"])
+        self.assertEqual(state["owner"], "system_1")
+        self.assertEqual(state["used_action_ids"], {"alpha", "bravo"})
+
+    def test_parallel_batch_rechecks_a_threshold_changed_while_selecting_children(self):
+        actions = {
+            key: {"tool_name": "memory_load", "tool_args": {"query": key},
+                  "independent_while_main": True, "parallel_safe": True}
+            for key in ("alpha", "bravo")
+        }
+        self.config["policy"].update({"actions": actions, "min_choice_probability": 0.85})
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        state["main_requested"] = True
+
+        async def decide(_state, _choices):
+            self.config["policy"]["min_choice_probability"] = 0.95
+            return types.SimpleNamespace(choice="bravo", confidence=0.90, backend="jev")
+
+        batch = asyncio.run(self.runtime._maybe_batch_independent(
+            agent, state, types.SimpleNamespace(choose=decide), "Inspect this page", actions,
+            "alpha", self.config["policy"], "Inspect this page", 0.85))
+
+        self.assertIsNone(batch)
+        self.assertEqual(state["used_action_ids"], set())
+        self.assertIsNone(state["pending"])
+
+    def test_parallel_started_jobs_are_not_evidence_until_matching_terminal_results_arrive(self):
+        alpha = {"tool_name": "memory_load", "tool_args": {"query": "alpha"},
+                 "share_result_with_backend": True, "allow_result_bindings": True}
+        bravo = {"tool_name": "memory_load", "tool_args": {"query": "bravo"},
+                 "share_result_with_backend": True, "allow_result_bindings": True}
+        self.config["policy"]["actions"] = {"alpha": alpha, "bravo": bravo}
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        state["pending"] = {"tool_name": "parallel", "wait": False, "job_ids": [], "batch": [
+            {"action_id": "alpha", "tool_name": "memory_load", "action_definition": alpha,
+             "share_result": True, "bind_result": True, "return_result": False, "result_limit": 2000},
+            {"action_id": "bravo", "tool_name": "memory_load", "action_definition": bravo,
+             "share_result": True, "bind_result": True, "return_result": False, "result_limit": 2000},
+        ]}
+        started = json.dumps({"status": "started", "jobs": [
+            {"job_id": "alpha-job", "tool_name": "memory_load", "state": "running"},
+            {"job_id": "bravo-job", "tool_name": "memory_load", "state": "pending"},
+        ]})
+        completed = json.dumps({"status": "success", "jobs": [
+            {"job_id": "alpha-job", "tool_name": "memory_load", "state": "success",
+             "result": "alpha result"},
+            {"job_id": "bravo-job", "tool_name": "memory_load", "state": "success",
+             "result": "bravo result"},
+        ]})
+
+        self.assertFalse(self.runtime.record_host_result(agent, "parallel", started))
+        self.assertEqual(state["observations"], [])
+        self.assertEqual(state["pending"]["job_ids"], ["alpha-job", "bravo-job"])
+        self.assertTrue(state["complete"])
+        self.assertEqual(state["owner"], "main")
+        self.assertEqual(self.runtime.pending_parallel_job_ids(agent), ["alpha-job", "bravo-job"])
+        self.assertTrue(self.runtime.record_host_result(agent, "parallel", completed))
+        self.assertEqual([item["action_id"] for item in state["observations"]], ["alpha", "bravo"])
+        self.assertEqual([item["binding_result"] for item in state["observations"]],
+                         ["alpha result", "bravo result"])
+        self.assertIsNone(state["pending"])
+        self.assertEqual(self.runtime.pending_parallel_job_ids(agent), [])
+
+    def test_parallel_failure_or_interrupt_never_becomes_a_bindable_child_result(self):
+        alpha = {"tool_name": "memory_load", "tool_args": {"query": "alpha"},
+                 "share_result_with_backend": True, "allow_result_bindings": True}
+        bravo = {"tool_name": "memory_load", "tool_args": {"query": "bravo"},
+                 "share_result_with_backend": True, "allow_result_bindings": True}
+        self.config["policy"]["actions"] = {"alpha": alpha, "bravo": bravo}
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        state["pending"] = {"tool_name": "parallel", "wait": True,
+                            "job_ids": ["alpha-job", "bravo-job"], "batch": [
+            {"action_id": "alpha", "tool_name": "memory_load", "action_definition": alpha,
+             "share_result": True, "bind_result": True, "return_result": False, "result_limit": 2000},
+            {"action_id": "bravo", "tool_name": "memory_load", "action_definition": bravo,
+             "share_result": True, "bind_result": True, "return_result": False, "result_limit": 2000},
+        ]}
+        partial = json.dumps({"status": "partial", "jobs": [
+            {"job_id": "alpha-job", "tool_name": "memory_load", "state": "success",
+             "result": "alpha result"},
+            {"job_id": "bravo-job", "tool_name": "memory_load", "state": "cancelled",
+             "error": "interrupted"},
+        ]})
+
+        self.assertTrue(self.runtime.record_host_result(agent, "parallel", partial))
+        self.assertEqual(len(state["observations"]), 2)
+        failed = state["observations"][1]
+        self.assertEqual(failed["action_id"], "bravo")
+        self.assertEqual(failed["binding_result"], "")
+        self.assertEqual(failed["result"], "")
+        self.assertIsNone(state["pending"])
+        self.assertTrue(any(event[0][1] == "parallel_failed" for event in self.timeline_events))
+
+    def test_parallel_await_subset_tracks_remaining_children_and_never_replays_a_result(self):
+        alpha = {"tool_name": "memory_load", "tool_args": {"query": "alpha"},
+                 "share_result_with_backend": True, "allow_result_bindings": True}
+        bravo = {"tool_name": "memory_load", "tool_args": {"query": "bravo"},
+                 "share_result_with_backend": True, "allow_result_bindings": True}
+        self.config["policy"]["actions"] = {"alpha": alpha, "bravo": bravo}
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        state["pending"] = {"tool_name": "parallel", "wait": True,
+                            "job_ids": ["alpha-job", "bravo-job"], "batch": [
+            {"action_id": "alpha", "tool_name": "memory_load", "action_definition": alpha,
+             "share_result": True, "bind_result": True, "return_result": False, "result_limit": 2000},
+            {"action_id": "bravo", "tool_name": "memory_load", "action_definition": bravo,
+             "share_result": True, "bind_result": True, "return_result": False, "result_limit": 2000},
+        ]}
+        bravo_only = json.dumps({"status": "partial", "jobs": [
+            {"job_id": "bravo-job", "tool_name": "memory_load", "state": "success",
+             "result": "bravo result"},
+        ]})
+        alpha_only = json.dumps({"status": "success", "jobs": [
+            {"job_id": "alpha-job", "tool_name": "memory_load", "state": "success",
+             "result": "alpha result"},
+        ]})
+
+        self.assertTrue(self.runtime.record_host_result(agent, "parallel", bravo_only))
+        self.assertEqual([item["action_id"] for item in state["observations"]], ["bravo"])
+        self.assertIsNotNone(state["pending"])
+        self.assertEqual(self.runtime.pending_parallel_job_ids(agent), ["alpha-job"])
+        self.assertTrue(self.runtime.record_host_result(agent, "parallel", alpha_only))
+        self.assertEqual([item["action_id"] for item in state["observations"]], ["bravo", "alpha"])
+        self.assertIsNone(state["pending"])
+        self.assertEqual(self.runtime.pending_parallel_job_ids(agent), [])
+        self.assertFalse(self.runtime.record_host_result(agent, "parallel", bravo_only))
+
+    def test_mixed_main_and_system1_parallel_await_records_only_tracked_children(self):
+        alpha = {"tool_name": "memory_load", "tool_args": {"query": "alpha"},
+                 "share_result_with_backend": True, "allow_result_bindings": True}
+        self.config["policy"]["actions"] = {"alpha": alpha}
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        state["pending"] = {"tool_name": "parallel", "wait": False,
+                            "job_ids": ["system1-alpha"], "batch": [
+            {"action_id": "alpha", "tool_name": "memory_load", "action_definition": alpha,
+             "share_result": True, "bind_result": True, "return_result": False, "result_limit": 2000},
+        ]}
+        aggregate = json.dumps({"status": "success", "jobs": [
+            {"job_id": "main-job", "tool_name": "code_execution_tool", "state": "success",
+             "result": "Main-owned result"},
+            {"job_id": "system1-alpha", "tool_name": "memory_load", "state": "success",
+             "result": "System 1 result"},
+        ]})
+
+        self.assertTrue(self.runtime.record_host_result(agent, "parallel", aggregate))
+        self.assertEqual([item["action_id"] for item in state["observations"]], ["alpha"])
+        self.assertEqual(state["observations"][0]["binding_result"], "System 1 result")
+        self.assertIsNone(state["pending"])
+
+    def test_oversized_parallel_result_recovers_known_terminal_jobs_but_keeps_running_ids(self):
+        alpha = {"tool_name": "memory_load", "tool_args": {"query": "alpha"}}
+        bravo = {"tool_name": "memory_load", "tool_args": {"query": "bravo"}}
+        self.config["policy"]["actions"] = {"alpha": alpha, "bravo": bravo}
+        agent = Agent()
+        agent.context = object()
+        state = self.runtime._turn_state(agent, create=True)
+        state["pending"] = {"tool_name": "parallel", "wait": False,
+                            "job_ids": ["alpha-job", "bravo-job"], "batch": [
+            {"action_id": "alpha", "tool_name": "memory_load", "action_definition": alpha,
+             "share_result": True, "bind_result": True, "return_result": False, "result_limit": 2000},
+            {"action_id": "bravo", "tool_name": "memory_load", "action_definition": bravo,
+             "share_result": True, "bind_result": True, "return_result": False, "result_limit": 2000},
+        ]}
+        parallel_tools = types.ModuleType("helpers.parallel_tools")
+        parallel_tools._jobs_for_context = lambda context: {
+            "alpha-job": types.SimpleNamespace(state="success", tool_name="memory_load"),
+            "bravo-job": types.SimpleNamespace(state="running", tool_name="memory_load"),
+        }
+
+        with patch.dict(sys.modules, {parallel_tools.__name__: parallel_tools}):
+            self.assertTrue(self.runtime.record_host_result(
+                agent, "parallel", "x" * 2_000_001))
+
+        self.assertEqual([item["action_id"] for item in state["observations"]], ["alpha"])
+        self.assertEqual(state["observations"][0]["binding_result"], "")
+        self.assertTrue(state["observations"][0]["truncated"])
+        self.assertEqual(self.runtime.pending_parallel_job_ids(agent), ["bravo-job"])
+        self.assertTrue(state["complete"])
+        self.assertTrue(any(event[0][1] == "parallel_failed" for event in self.timeline_events))
+
+    def test_failed_direct_host_result_is_not_shareable_or_bindable(self):
+        action = {"tool_name": "memory_load", "tool_args": {"query": "project"}}
+        self.config["policy"]["actions"] = {"lookup": action}
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        state["pending"] = {
+            "action_id": "lookup", "tool_name": "memory_load", "action_definition": action,
+            "share_result": True, "bind_result": True, "return_result": True, "result_limit": 2000,
+        }
+
+        self.assertTrue(self.runtime.record_host_result(
+            agent, "memory_load", "ERROR: MCP tool reported failure. unavailable", succeeded=False))
+        observation = state["observations"][-1]
+        self.assertEqual(observation["result"], "")
+        self.assertEqual(observation["binding_result"], "")
+        self.assertEqual(observation["return_result"], "")
+        self.assertTrue(state["tool_failed"])
+        self.assertTrue(state["complete"])
+
+    def test_mcp_failure_text_in_parallel_success_job_is_never_decision_evidence(self):
+        action = {"tool_name": "memory_load", "tool_args": {"query": "project"}}
+        self.config["policy"]["actions"] = {"lookup": action}
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        state["pending"] = {"tool_name": "parallel", "wait": True,
+                            "job_ids": ["lookup-job"], "batch": [
+            {"action_id": "lookup", "tool_name": "memory_load", "action_definition": action,
+             "share_result": True, "bind_result": True, "return_result": True, "result_limit": 2000},
+        ]}
+        aggregate = json.dumps({"status": "success", "jobs": [
+            {"job_id": "lookup-job", "tool_name": "memory_load", "state": "success",
+             "result": "ERROR: MCP tool reported failure. unavailable"},
+        ]})
+
+        self.assertTrue(self.runtime.record_host_result(agent, "parallel", aggregate))
+        observation = state["observations"][-1]
+        self.assertEqual(observation["result"], "")
+        self.assertEqual(observation["binding_result"], "")
+        self.assertEqual(observation["return_result"], "")
+        self.assertTrue(observation["truncated"])
+        self.assertTrue(state["complete"])
+
+    def test_native_parallel_error_text_with_success_state_is_not_successful_evidence(self):
+        failed = {"tool_name": "skills_tool", "tool_args": {"action": "search", "query": "missing"},
+                  "share_result_with_backend": True, "allow_result_bindings": True,
+                  "return_result_to_user": True}
+        valid = {"tool_name": "memory_load", "tool_args": {"query": "project"},
+                 "share_result_with_backend": True, "allow_result_bindings": True,
+                 "return_result_to_user": True}
+        self.config["policy"]["actions"] = {"failed": failed, "valid": valid}
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        state["pending"] = {"tool_name": "parallel", "wait": True,
+                            "job_ids": ["skills-job", "memory-job"], "batch": [
+            {"action_id": "failed", "tool_name": "skills_tool", "action_definition": failed,
+             "share_result": True, "bind_result": True, "return_result": True, "result_limit": 2000},
+            {"action_id": "valid", "tool_name": "memory_load", "action_definition": valid,
+             "share_result": True, "bind_result": True, "return_result": True, "result_limit": 2000},
+        ]}
+        error_signature = self.runtime._call_signature({
+            "tool_name": "skills_tool", "tool_args": {"action": "search", "query": "missing"}})
+        aggregate = json.dumps({"status": "partial", "jobs": [
+            {"job_id": "skills-job", "tool_name": "skills_tool", "state": "success",
+             "result": "Error: no matching installed skill"},
+            {"job_id": "memory-job", "tool_name": "memory_load", "state": "success",
+             "result": "project context"},
+        ]})
+
+        self.assertTrue(self.runtime.record_host_result(agent, "parallel", aggregate))
+        rejected, accepted = state["observations"]
+        self.assertEqual(rejected["action_id"], "failed")
+        self.assertEqual(rejected["result"], "")
+        self.assertEqual(rejected["binding_result"], "")
+        self.assertEqual(rejected["return_result"], "")
+        self.assertTrue(rejected["truncated"])
+        self.assertEqual(accepted["action_id"], "valid")
+        self.assertEqual(accepted["result"], "project context")
+        self.assertEqual(accepted["binding_result"], "project context")
+        self.assertEqual(accepted["return_result"], "project context")
+        self.assertTrue(state["parallel_failed"])
+        self.assertTrue(state["complete"])
+        self.assertNotIn(error_signature, state.get("committed_signatures", set()))
+        self.assertTrue(any(event[0][1] == "parallel_failed" for event in self.timeline_events))
 
 
 if __name__ == "__main__":

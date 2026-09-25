@@ -51,7 +51,9 @@ three, maximum eight), and an action ID cannot repeat within a turn. A tool
 error or missing result goes to Main. A raw MCP result never finishes a user
 request: Main receives recorded evidence and writes a useful final answer
 when prose is needed, without repeating a successful call unless evidence is
-insufficient. Empty or uncertain choices, service
+insufficient. The continuation note carries only bounded, masked result
+excerpts from actions that allow backend sharing; the full host Tool history
+remains authoritative. Empty or uncertain choices, service
 errors, and open-ended work also go to Main. With an empty action map, System 1
 has no direct actions to dispatch. If Auxiliary Model Roles is installed and
 configured, System 1 may delegate a Tool or Coding goal through Agent Zero's
@@ -140,6 +142,7 @@ policy:
       share_result_with_backend: true
       return_result_to_user: false
       independent_while_main: false
+      parallel_safe: false
 ```
 
 `share_result_with_backend` sends at most `max_result_chars` (default 2000)
@@ -157,6 +160,29 @@ an opted-in action through the normal host tool path; Main's later advice is
 applied only to subsequent decisions. A changed request or action definition
 invalidates the pending choice. A timed-out Main advisory does not delay later
 System 1 decisions or apply a late correction.
+
+Main may select a configured action itself or hand a bounded set of eligible
+action IDs back to System 1 through `system1_delegate`. The plugin checks the
+current request, action definitions, permissions, and prior calls again before
+dispatch. System 1 can decline a handback if the action is unsafe or uncertain;
+Main then sees that the action did not run. The same handback cannot repeat
+without new host evidence. Main can still use ordinary Agent Zero tools for open-ended work and
+writes the final answer from recorded evidence. The plugin's native tool prompt
+lists the exact `action_ids` argument shape for Main.
+
+`parallel_safe` is another separate per-action opt-in. Set it to true only when
+the action can run beside other opted-in actions without depending on their
+results or changing shared state. System 1 may then submit a batch through
+Agent Zero's native `parallel` tool before or while Main reasons. Without a
+pending Main subtask, the batch waits for its terminal results. Each child has its own
+job ID and recorded outcome; a started job is not a completed result. Dependent
+actions wait for their prerequisites, and the plugin defers a final answer
+until every outstanding native job is collected. The same resolved tool call
+cannot be automatically replayed under another configured action ID. Main's
+own native parallel children also enter the task's call ledger: pending or
+successful children block a matching System 1 call, and only a verified
+failed child permits retry. A child result carrying an error is not shared as
+successful evidence even when the native job envelope reports success.
 
 Only configure actions whose exact tool schema and permissions you have
 verified on the installed Agent Zero version. There is no automatic local to

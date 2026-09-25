@@ -145,7 +145,7 @@
       <div class="field-control"><select x-model="config.policy.preset" @change="applyPreset()"><option value="fast">Fast</option><option value="balanced">Balanced</option><option value="conservative">Conservative</option></select></div>
     </div>
     <div class="field">
-      <div class="field-label"><div class="field-title">Action eligibility</div><div class="field-description">Configured tool names with fixed or validated request/result arguments. System 1 may choose these actions; Agent Zero executes them. Uncertain or open-ended steps go to Main.</div></div>
+      <div class="field-label"><div class="field-title">Action eligibility</div><div class="field-description">Configured tool names with fixed or validated request/result arguments. System 1 may choose these actions; Agent Zero executes them. Uncertain or open-ended steps go to Main. Set parallel_safe for each action that may run concurrently with other independent actions.</div></div>
       <div class="field-control"><textarea data-system-one-draft="actions" x-model="config.policy._actions_json" @input="validateJson('actions', $el, config)" @blur="validateJson('actions', $el, config)" :aria-invalid="actionError ? 'true' : 'false'" aria-describedby="system-one-actions-error" x-init="config.policy._actions_json = JSON.stringify(config.policy.actions || {}, null, 2)" spellcheck="false"></textarea><div id="system-one-actions-error" class="system-one-validation-error" x-show="actionError" x-text="actionError" role="alert"></div></div>
     </div>
     <div class="field">

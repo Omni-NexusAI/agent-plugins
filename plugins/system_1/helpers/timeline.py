@@ -4,11 +4,25 @@ from __future__ import annotations
 
 import time
 import uuid
+import re
 
 from helpers import plugins
 
 
 KEY = "system_1_main_timeline"
+
+_EVENTS = {
+    "main_requested": ("Main reasoning requested", "Main owns uncertain work"),
+    "main_action": ("Main selected action", "Host action pending"),
+    "main_delegate": ("Main delegated to System 1", "Bounded choice pending"),
+    "independent_action": ("Independent System 1 action", "Main reasoning continues"),
+    "parallel_started": ("Parallel actions started", "Awaiting host results"),
+    "parallel_observed": ("Parallel results observed", "Results available for decisions"),
+    "parallel_failed": ("Parallel action failed", "Main will assess the failure"),
+    "tool_failed": ("Host action failed", "Main will assess the failure"),
+    "stale_advice": ("Stale Main advice discarded", "Task state changed"),
+    "final_handoff": ("Final answer handed to Main", "Main will use recorded evidence"),
+}
 
 
 def _temporary(agent):
@@ -86,4 +100,24 @@ def record_main_observation(agent, tool_name: str) -> None:
         )
     except Exception:
         # Logging cannot change whether the host's tool result is accepted.
+        return
+
+
+def record_main_event(agent, kind: str, tool_name: str = "", count: int = 0) -> None:
+    """Add a fixed-label S1 transition without logging model text or tool data."""
+    try:
+        event = _EVENTS.get(kind)
+        if event is None:
+            return
+        kvps = {"Route": event[0], "Outcome": event[1]}
+        if tool_name and re.fullmatch(r"[A-Za-z0-9_.:-]{1,120}", tool_name):
+            kvps["Action"] = tool_name
+        if type(count) is int and 1 <= count <= 8:
+            kvps["Actions"] = str(count)
+        agent.context.log.log(
+            type="info", heading=f"System 1 · Main: {event[0].lower()}",
+            id=f"system1-main-{uuid.uuid4().hex}", kvps=kvps,
+        )
+    except Exception:
+        # Observability must not change routing or host execution.
         return

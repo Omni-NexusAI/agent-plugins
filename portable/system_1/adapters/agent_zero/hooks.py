@@ -54,7 +54,8 @@ def _valid_action(key: str, value: dict, actions: dict) -> bool:
         return False
     return all(isinstance(value.get(flag, False), bool)
                for flag in ("share_result_with_backend", "return_result_to_user",
-                            "independent_while_main", "allow_result_bindings"))
+                            "independent_while_main", "parallel_safe",
+                            "allow_result_bindings"))
 
 
 def get_plugin_config(default=None, **kwargs):

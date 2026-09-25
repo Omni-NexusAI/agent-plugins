@@ -70,6 +70,22 @@ class TimelineTests(unittest.TestCase):
         self.assertEqual(item["kvps"]["Action"], "github_mcp_server.get_pull_request")
         self.assertNotIn("Private request", str(item))
 
+    def test_dynamic_transition_events_are_fixed_and_sanitized(self):
+        self.timeline.record_main_event(
+            self.agent, "parallel_started", "github_mcp_server.get_file_contents", 2)
+        self.timeline.record_main_event(self.agent, "main_action", "bad\nprivate", 99)
+        self.timeline.record_main_event(self.agent, "unknown_event", "memory_load", 1)
+
+        self.assertEqual(len(self.logged), 2)
+        parallel, invalid = self.logged
+        self.assertEqual(parallel["kvps"]["Route"], "Parallel actions started")
+        self.assertEqual(parallel["kvps"]["Actions"], "2")
+        self.assertEqual(parallel["kvps"]["Action"], "github_mcp_server.get_file_contents")
+        self.assertEqual(invalid["kvps"]["Route"], "Main selected action")
+        self.assertNotIn("Action", invalid["kvps"])
+        self.assertNotIn("Actions", invalid["kvps"])
+        self.assertNotIn("Private request", str(self.logged))
+
 
 if __name__ == "__main__":
     unittest.main()

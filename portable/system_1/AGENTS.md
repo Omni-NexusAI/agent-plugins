@@ -73,13 +73,37 @@
   deadline must return even if its underlying model call ignores cancellation.
   Retain at most one such unfinished advisory call per agent; skip new advice
   until it exits, and never apply a late result.
+- Main may return a bounded eligible action or delegate a finite choice to
+  System 1 in the same monologue. Revalidate the task, configured action,
+  resolved arguments, permissions, and prior call ledger at the point of
+  submission. Main retains open-ended reasoning and final prose. A foreground
+  Main delegation uses the plugin tool; it must not bypass the host tool path.
+  System 1 may decline a delegated choice. Do not present that handback as a
+  completed action or accept an identical handback again without new host
+  evidence.
+- Use Agent Zero's native `parallel` tool only for calls independently marked
+  both `independent_while_main` and `parallel_safe`. The first flag covers
+  concurrency with Main; the second asserts the calls do not depend on each
+  other or share mutable state. Track each native job ID and terminal result
+  separately, including reordered or partial collections. A started job is
+  not evidence of completion, and Main may not finish with uncollected jobs.
+  Dependent calls wait for their prerequisite host-recorded results.
+- Prevent automatic replay across different configured action IDs and after
+  a successful Main call by comparing canonical tool name and resolved
+  arguments; retain only a hash of the canonical call in task state. Main's
+  native parallel children also enter that ledger by validated job ID: a
+  pending child blocks replay, terminal success stays blocked, and a verified
+  failed child may be retried. Unparsed or mismatched job results fail closed.
+  A native child whose recorded result is an error is failed evidence even if
+  the native parallel envelope labels the job successful.
 - On Agent Zero, the first model turn is loop iteration zero. A later
   iteration can make another System 1 decision only after an observed result
   from its pending tool, within the action cap; other iterations belong to Main.
 - The Agent Zero adapter records a native Info step with a `system1-main-`
   ID for each eligible Main decision, before the native GEN step. It updates each record with
   route, backend, confidence when available, and elapsed time. Never put
-  request text, tool arguments, or credentials in the timeline record.
+  request text, tool arguments, or credentials in the timeline record. Mark
+  failed host actions as failures, not available observations.
 
 ## Verification
 

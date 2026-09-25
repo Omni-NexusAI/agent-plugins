@@ -21,16 +21,19 @@ argument binding may use an unambiguous validated request field or a field
 from a complete masked JSON result of an action that opted into result bindings.
 Unknown shapes, truncated results, revoked permissions, or stale action
 definitions hand off to Main. A raw MCP result is never the final user answer.
-The timeline records a separate observation marker after the host records a
-System 1 tool result, without copying its content or arguments.
+The timeline records a separate observation marker after a successful host
+result, or a failure marker after a failed host result, without copying its
+content or arguments. A failed result is never decision or binding evidence.
 If an eligible action falls below the configured confidence threshold, the
 handoff detail says so rather than claiming that no action was eligible.
 When System 1 finishes after observed tools, a foreground Main call receives
-a bounded continuation note listing only validated tool names. The note points
-Main to the host's own tool history for evidence and asks it to finish the
-user-facing answer without repeating a recorded call unless necessary. It is
-not added to background advisory calls or later user turns, and never copies
-request text, tool arguments, results, or credentials.
+a bounded continuation note listing validated tool names and masked result
+excerpts only for actions whose policy permits sharing results with the
+decision backend. Agent Zero may omit earlier tool records from the active
+model prompt. The note marks excerpts as untrusted data, points Main to host
+history for verification, and asks it to finish without repeating a recorded
+call unless necessary. It is not added to background advisory calls or later
+user turns, and never copies request text, tool arguments, or credentials.
 The read-only metrics API exposes per-agent Utility bypass and fallback counts
 and timing, without prompts, responses, or credentials. Plugin-owned timing
 hooks bracket host prompt preparation, foreground/background Main calls, tool
@@ -60,6 +63,28 @@ decision, after rechecking the request and action configuration. If the model
 call outlives the advisory deadline, detach its result and never apply it later.
 Allow at most one unfinished detached advisory per agent so repeated turns do
 not accumulate provider calls; subsequent uncertainty falls back to Main.
+`parallel_safe` is a separate per-action opt-in for native parallel batching.
+Only explicitly independent calls may be batched, with each child result
+validated and counted by native job ID. Before Main is requested, the batch
+waits for terminal results so System 1 can decide dependent next steps. Native
+`wait: false` may let Main use its ordinary tools while System 1 jobs run.
+The response tool must be guarded
+until every outstanding job has a host-recorded terminal result, including
+partial or reordered collections. Never treat a started job as observed
+evidence. Classify each child's recorded result as well as its native job
+state; error text is never shared or bound as successful evidence. Main-owned
+native parallel child signatures enter the same per-task replay ledger by
+validated job ID. Pending and successful calls block a matching System 1
+submission, while a verified failed child may be retried. Unparsed job
+results remain blocked. The foreground `system1_delegate` tool returns a bounded eligible
+choice to System 1 in the same monologue; the runtime checks the current
+request, config, action cap, permissions, and canonical call ledger again.
+Delegated decisions retain a Main fallback so System 1 can decline; the
+Decider sees bounded handback context. A declined action is not completed
+evidence. Do not accept an identical delegation again without a new host
+observation, and tell Main explicitly when no delegated action ran.
+Keep its `prompts/agent.system.tool.system1_delegate.md` entry installed so
+Main sees the exact native tool name and `action_ids` argument shape.
 The guarded
 `set_messages_after_loop` WebUI extension recognizes its `system1-main-` ID
 and marks only that record with an S1

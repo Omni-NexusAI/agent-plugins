@@ -4,12 +4,32 @@ This record describes the Agent Zero test instance used for the System 1 expansi
 
 ## Implemented checks
 
-- The portable Python suite and assembled Agent Zero package are checked together. The package must import without the monorepo. The current expansion has 102 passing focused tests and 38 assembled files; the package imported inside the existing Agent Zero test container after the final local update, and its HTTP endpoint returned 200.
+- The portable Python suite and assembled Agent Zero package are checked together. The package must import without the monorepo. The dynamic-control revision has 155 passing focused tests and 44 assembled files; the updated package has been installed in the existing Agent Zero test container for live checks.
 - Agent Zero remains the executor for native and MCP tools. System 1 selects bounded actions; later decisions consume host-recorded results. Main writes the final answer when the evidence needs prose.
 - Utility direct memory-query and bounded relevance choices are eligible only for verified host call shapes. Unknown, changed, failed, or uncertain calls use the complete original Utility call. Embedding mode does not replace vectors or the index.
 - The plugin settings page and S1 timeline were inspected in the rendered host UI at desktop and narrow widths. The shared Decider card used adjacent native model field styles and fit the narrow modal; S1 steps expanded beside unchanged Gen and MCP records at both widths. After the final package update, opening the plugin settings moved keyboard focus into the modal, and reverse Tab from the close button wrapped to Cancel instead of reaching the background list. Invalid action JSON displayed a field error, blocked Save, and kept focus in the field; Cancel then reopened with the original valid value and initial focus on the first select. A temporary unreachable Decider endpoint made the rendered status show `unavailable`; after automatic config restoration, Check connection showed the disabled-button `Checking…` state followed by `available`. The temporary viewport override and inspection tabs were removed afterward.
 
 ## Practical Main evidence
+
+### Dynamic task control on the current local build
+
+The live Jev checks below used the existing test instance, its connected GitHub MCP (26 tools), and read-only native tools. Each trial restored the saved System 1 settings. They are bounded examples, not estimates of general task success or speed.
+
+| Path | Recorded result | Complete request time |
+| --- | --- | ---: |
+| Uncertain Main work with independent actions | Main owned the uncertain comparison while Agent Zero started native parallel skills and GitHub status jobs, collected their results, and produced a substantive answer. Both child calls appeared once. | 46.27 s |
+| Main delegates back to System 1 | System 1 ran the native skills search; Main called `system1_delegate` once; System 1 then selected a separate GitHub PR-status lookup. Agent Zero recorded each action once, and Main wrote the final skills and CI answer. | 58.92 s |
+| Independent parallel calls | One native parallel batch contained skills search and GitHub PR status; each child result was recorded before Main's complete answer. | 48.73 s |
+| Dependent sequence | GitHub PR status and skills search were independent parallel children. A later README read used the exact commit SHA in the recorded status result and was not batched with its prerequisite. Each child and dependent read appeared once. | 39.52 s |
+| Failed MCP read | One missing-file lookup failed; the S1 timeline marked failure, and Main answered that the file was unavailable without retrying the call. | 32.84 s |
+
+The Main-to-System-1 handback was also tried with an earlier, less specific prompt. Jev declined the bounded PR-status choice, and Main reported that it had not run; that trial does not count as a successful handback. The completed handback above used a prompt that explicitly requested both the skills and CI facts. This demonstrates that the return path works while retaining Jev's ability to decline an action.
+
+In a single like-for-like PR lookup, Main-only completed in 27.30 s and System-1-on completed in 17.64 s. Both made one GitHub call and passed the same bounded answer checks. One pair cannot establish a repeatable speed gain. Unit regressions cover Main-owned parallel child replay prevention, mixed success and failure, malformed collection, low-confidence and stale handback, and native error text inside a successful parallel envelope; those cases are not all live host proofs.
+
+The dynamic build was also rechecked through the stable-corpus memory matrix: two full two-turn chats per mode, eight chats total. All eight completed and all bounded answer checks passed. Test-chat ingestion was disabled, and the FAISS and pickle index hashes were byte-identical before and after; both plugin and memory settings were restored. Utility-only made two Decider query decisions and bypassed 2 of 9 completed Utility calls (22.2%); both-on made two decisions and bypassed 2 of 10 (20%). Modes with Utility off bypassed none. The ambiguous follow-up retained normal Utility generation. Median complete two-turn time was 123.95 s both-off, 115.92 s Main-only, 151.32 s Utility-only, and 148.83 s both-on. The Utility-on cells took longer end-to-end in this run despite reducing measured Utility model time; with two repetitions per cell and wide ranges, there is no demonstrated speed gain. Decision time summed to 0.65 s Utility-only and 0.60 s both-on across their four turns, excluding overlapping stages.
+
+An additional live Embedding-only memory query completed in 49.19 s and passed the bounded answer checks. It made one Decider guidance decision, bypassed zero Utility calls, left the selected embedding model configuration unchanged, and preserved byte-identical memory index hashes. Saved plugin and memory settings were restored.
 
 The real GitHub MCP reported 26 connected tools. A repeated comparison used two read-only tasks, two repetitions each, under four mode combinations. All 16 requests produced complete answers that passed their bounded factual checks, and the expected host-recorded tool result appeared in each. System 1 selected the expected tool in all eight Main-on trials; Main selected it in the eight Main-off trials. No duplicate tool events appeared.
 
