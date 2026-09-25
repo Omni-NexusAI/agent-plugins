@@ -44,8 +44,10 @@ The memory index remained readable after test chat ingestion: FAISS loaded with 
 
 ## Remaining local acceptance
 
-- Resolve the short Utility-only follow-up in the stable-corpus comparison and repeat enough comparable completed tasks to determine whether any full-task gain is reliable. The observational matrices above are not speed claims.
-- Repeat comparable mixed tasks before making a speed claim; the short mixed success and the earlier late answer show substantial task-dependent variance.
-- Recheck the final rendered settings and S1 timeline after the last package update, then refresh the open draft pull request with only verified results.
+- The final rendered settings and S1 timeline were rechecked after the last package update. The assembled package was imported in the existing test container, the focused suite passed, and the draft pull request was refreshed with the verified source.
+- For hands-on use, the existing test instance has Main and Utility enabled, Embedding disabled, and memory query preparation and post-filter enabled. Three additional read-only test actions were configured locally: native skills search, GitHub pull-request status, and a README read bound to the observed status SHA. These action definitions and the lower read-only test confidence threshold are local test settings, not changes to the pull request or production configuration.
+- A focused hands-on prompt used the status lookup followed by the SHA-bound README read. System 1 selected both actions, Agent Zero recorded each result once, Main wrote a substantive answer, and the HTTP request completed in 30 seconds. Saved System 1 and memory settings and the memory index were unchanged across this probe.
+- A broader hands-on prompt added native skills search and an open-ended comparison. System 1 selected and observed all three actions once, with no Main-dispatched duplicate tool. Agent Zero logged two malformed Main responses and a repeated-response retry. The client timed out after 300 seconds, although the host later produced a substantive final answer. The test-chat memory index changed after that client deadline when the host completed delayed ingestion; that trial is not an index-preservation or latency success.
+- The Utility-only ambiguous follow-up in the stable-corpus matrix remains an answer-quality failure. More completed, like-for-like trials are required before claiming reliable full-task speed gains, particularly for open-ended mixed prompts. The user's hands-on acceptance remains pending.
 
 The browser, desktop-control, image-capable, and local alternative backend evaluations are later work.
