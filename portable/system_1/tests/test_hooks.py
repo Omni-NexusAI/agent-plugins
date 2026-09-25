@@ -45,6 +45,32 @@ class ActionConfigTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             HOOKS.save_plugin_config(settings=settings)
 
+    def test_request_binding_accepts_only_declared_bounded_value(self):
+        action = {"tool_name": "github_mcp_server.get_pull_request_status",
+                  "tool_args": {"owner": "Omni-NexusAI", "repo": "agent-plugins"},
+                  "argument_bindings": {"pull_number": {
+                      "source": "request", "prefix": "Check PR ", "suffix": " status",
+                      "value_type": "integer"}}}
+        settings = {"policy": {"actions": {"status": action}}}
+        self.assertIs(HOOKS.save_plugin_config(settings=settings), settings)
+        action["argument_bindings"]["pull_number"]["value_type"] = "arbitrary"
+        with self.assertRaises(ValueError):
+            HOOKS.save_plugin_config(settings=settings)
+
+    def test_result_binding_requires_source_action_opt_in(self):
+        actions = {
+            "first": {"tool_name": "known_tool", "tool_args": {"query": "safe"}},
+            "second": {"tool_name": "known_tool", "tool_args": {},
+                       "argument_bindings": {"item_id": {
+                           "source": "result", "from_action": "first", "path": ["id"],
+                           "value_type": "integer"}}},
+        }
+        settings = {"policy": {"actions": actions}}
+        with self.assertRaises(ValueError):
+            HOOKS.save_plugin_config(settings=settings)
+        actions["first"]["allow_result_bindings"] = True
+        self.assertIs(HOOKS.save_plugin_config(settings=settings), settings)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,42 @@ action IDs. It withholds result content from the decision service unless the
 action explicitly opts in, and returns observed content directly to the user
 only with a separate action opt-in. Recheck both permissions and the exact
 action definition immediately before the next decision. A guarded
+argument binding may use an unambiguous validated request field or a field
+from a complete masked JSON result of an action that opted into result bindings.
+Unknown shapes, truncated results, revoked permissions, or stale action
+definitions hand off to Main. A raw MCP result is never the final user answer.
+The timeline records a separate observation marker after the host records a
+System 1 tool result, without copying its content or arguments.
+If an eligible action falls below the configured confidence threshold, the
+handoff detail says so rather than claiming that no action was eligible.
+When System 1 finishes after observed tools, a foreground Main call receives
+a bounded continuation note listing only validated tool names. The note points
+Main to the host's own tool history for evidence and asks it to finish the
+user-facing answer without repeating a recorded call unless necessary. It is
+not added to background advisory calls or later user turns, and never copies
+request text, tool arguments, results, or credentials.
+The read-only metrics API exposes per-agent Utility bypass and fallback counts
+and timing, without prompts, responses, or credentials. Plugin-owned timing
+hooks bracket host prompt preparation, foreground/background Main calls, tool
+execution, and the memory-recall hook span. Delayed recall may outlive that span;
+ingestion is deferred by the host at monologue end, so this hook layer does not
+measure its background index writes. Spans may
+overlap; never add them to infer wall time. Incomplete spans are omitted.
+Utility bypasses only
+verified host memory-query and bounded candidate-filter prompt shapes; it
+returns validated query text or JSON indices in the normal Utility callback.
+Unknown shapes, errors, and generative work use the original Utility model.
+The query fast path accepts first-turn history only when its isolated `user:`
+envelope decodes to the same sanitized current-user fields as the `user:`
+request, optionally after the one pinned host bootstrap record. It rejects
+prior, other AI, tool, or truncated history. Query and filter system templates are matched
+by pinned normalized text, not broad prompt similarity.
+Configured fixed Utility routes are separate and must reject every recognized
+built-in `_memory` system prompt, including ingestion and summary templates.
+Embedding-only mode may add a bounded Decider-selected provenance reminder to a
+recognized memory query, filter, or ingestion Utility request, then always leaves
+the selected Utility model, embedding vectors, memory index, and host write path
+in control.
 `independent_while_main` action opt-in is required before System 1 may continue
 dispatching a configured action while a background Main correction is pending;
 the host remains the sole executor. Background advice may guide only a later
@@ -52,5 +88,13 @@ bypasses, and fallback attempts per agent and contain no
 request or response text. The save hook validates route uniqueness, bounds,
 and response choices, and removes the UI draft. Route prompts and fixed response
 choices are sent to the configured decision backend only for an exact match;
-oversized choices fall back to Utility. A decided fallback must not issue a
+recognized built-in `_memory` prompts are always ineligible for fixed responses.
+Oversized choices fall back to Utility. A decided fallback must not issue a
 second decision before the original Utility call.
+The plugin settings view parses Action eligibility and Utility fixed responses
+through Alpine methods on input and blur. It guards the host Save action until
+both JSON drafts are valid, displays inline errors, and restores the host Save
+method when the view is removed. Because the current host plugin modal does not
+trap keyboard focus, this view focuses its first control on open, keeps Tab and
+Shift+Tab within the modal, and removes its listener on close. Do not alter
+background plugin-list controls or host modal behavior globally.

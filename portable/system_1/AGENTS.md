@@ -5,12 +5,14 @@
 - `core/` owns finite-choice decisions, backend clients, validation, and policy.
 - `adapters/agent_zero/` owns Agent Zero hooks, settings UI, and assembly.
 - `../../plugins/system_1/` is the assembled Agent Zero distribution; regenerate it with `assemble.py`.
+- `VERIFICATION.md` records sanitized local behavior evidence and open acceptance gates.
 
 ## Contracts
 
 - The assembled package must run without this source tree.
-- Only the host may execute actions. Decisions select predeclared actions with exact,
-  nonempty arguments. A second System 1 decision is eligible only after the host
+- Only the host may execute actions. Decisions select predeclared actions with
+  fixed or typed, bounded argument bindings from a validated request or a complete,
+  masked prior JSON result. A second System 1 decision is eligible only after the host
   records the selected tool's result in the same monologue. Per-turn state must
   reset on a new monologue, cap actions, and avoid replaying a used action ID.
 - Tool results are not sent to a decision backend by default. An action must
@@ -31,6 +33,30 @@
   Reject oversized state rather than dropping a correction, tool result, or
   Utility message.
 - Embedding vectors remain the host embedding model's output.
+- Utility memory query and relevance decisions require verified Agent Zero prompt
+  shapes and validated outputs. Unknown, oversized, malformed, uncertain, or failed
+  decisions fall back to the full original Utility model call. Utility still writes
+  memory entries, summaries, titles, and other open-ended text. Per-agent metrics
+  count bypassed calls, ordinary generation, fallback calls, and decision/model time
+  without storing prompt contents or credentials. Fixed routes must reject every
+  recognized built-in `_memory` system prompt, including query, filtering, summary,
+  extraction, consolidation, and history prompts. The direct query/filter paths
+  require their current exact normalized templates. A direct query may accept the
+  initial `user:` history entry only when its decoded sanitized current-user
+  fields equal the `user:` request envelope. It also accepts one pinned host
+  bootstrap AI record followed by that entry and at most the host's one verified
+  trailing line feed. Prior entries, other AI output,
+  tool records, or a changed memory-like host template are conservatively kept
+  on the original Utility path. Embedding-only mode may append
+  bounded provenance guidance to recognized memory query, filtering, or ingestion
+  calls after direct-response eligibility is complete; it never changes the host
+  embedding model, vectors, index, or write operation.
+- Stage metrics bracket verified host hook points for prompt preparation,
+  foreground/background Main calls, tool execution, and the memory-recall hook
+  span. They retain only counts and elapsed time. Delayed recall can continue
+  after that span; the host schedules ingestion in a background thread, so the
+  hook boundary does not time index writes. Overlapping
+  spans are reported separately and must not be summed as wall time.
 - Utility fixed responses require an explicit exact system/message route and a
   predeclared finite response. A guarded model wrapper must preserve the host
   Utility call and callback shape, recheck the request and route at call time,

@@ -46,6 +46,64 @@ class RoutingTests(unittest.TestCase):
     def tearDown(self):
         self.modules.stop()
 
+    def test_main_correction_is_never_partially_forwarded(self):
+        state = {"main_guidance": "", "actions_submitted": 0,
+                 "main_started_actions": 0}
+        guidance = "use the validated result " * 110
+        self.runtime._consume_main_result(state, {"kind": "correction", "text": guidance})
+        self.assertEqual(state["main_guidance"], guidance)
+        with self.assertRaises(RuntimeError):
+            self.runtime._decision_state("request", [], {}, 128, guidance)
+
+    def test_main_handoff_uses_only_current_host_observation_names(self):
+        action = {"tool_name": "github_mcp_server.get_pull_request_status",
+                  "tool_args": {"pull_number": 11}}
+        self.config["policy"]["actions"] = {"status": action}
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=2)
+        state = self.runtime._turn_state(agent, create=True)
+        state["complete"] = True
+        state["observations"].append({
+            "action_id": "status", "action_definition": action,
+            "tool_name": action["tool_name"], "result": "private-result-marker"})
+        note = self.runtime.main_handoff_note(agent)
+        self.assertIn("already executed 1 selected tool call", note)
+        self.assertIn(action["tool_name"], note)
+        self.assertIn("clear final answer", note)
+        self.assertNotIn("private-result-marker", note)
+        agent.last_user_message = types.SimpleNamespace(output_text=lambda: "New request")
+        self.assertEqual(self.runtime.main_handoff_note(agent), "")
+
+    def test_main_handoff_disappears_if_action_policy_changes(self):
+        action = {"tool_name": "memory_load", "tool_args": {"query": "safe"}}
+        self.config["policy"]["actions"] = {"lookup": action}
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=1)
+        state = self.runtime._turn_state(agent, create=True)
+        state["complete"] = True
+        state["observations"].append({
+            "action_id": "lookup", "action_definition": action,
+            "tool_name": "memory_load", "result": "observed"})
+        self.config["policy"]["actions"]["lookup"] = {
+            "tool_name": "memory_load", "tool_args": {"query": "changed"}}
+        self.assertEqual(self.runtime.main_handoff_note(agent), "")
+
+    def test_oversized_main_advisory_is_not_sent_truncated(self):
+        agent = Agent()
+        called = []
+        async def fake_call(**kwargs):
+            called.append(kwargs)
+            return ('{"kind":"correction","text":"ok"}', "")
+        agent.call_chat_model = fake_call
+        module = types.ModuleType("langchain_core.messages")
+        module.HumanMessage = lambda content: content
+        module.SystemMessage = lambda content: content
+        with patch.dict(sys.modules, {"langchain_core": types.ModuleType("langchain_core"),
+                                      "langchain_core.messages": module}):
+            result = asyncio.run(self.runtime._run_main_correction(agent, "x" * 4001, 1))
+        self.assertIsNone(result)
+        self.assertFalse(called)
+
     def test_tool_first_uses_normal_host_delegation_tool(self):
         result = asyncio.run(self.runtime.main_decision(Agent()))
         self.assertEqual(json.loads(result), {"tool_name": "auxiliary_delegate",
@@ -82,6 +140,21 @@ class RoutingTests(unittest.TestCase):
         result = asyncio.run(self.runtime.main_decision(Agent()))
         self.assertEqual(json.loads(result)["tool_name"], "memory_load")
         self.assertEqual(self.timeline_events[-1][1]["action_name"], "memory_load")
+
+    def test_low_confidence_action_handoff_explains_threshold(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        self.config["policy"]["min_choice_probability"] = 0.5
+        self.config["policy"]["actions"] = {
+            "recall": {"tool_name": "memory_load", "tool_args": {"query": "current project"}}}
+
+        async def decide(state, choices):
+            return types.SimpleNamespace(choice="recall", confidence=0.47, backend="jev")
+
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(Agent())))
+        self.assertEqual(self.timeline_events[-1][0][1], "Handed off to Main")
+        self.assertEqual(self.timeline_events[-1][1]["detail"],
+                         "Decision confidence below action threshold")
 
     def test_host_result_drives_next_decision_without_replaying_action(self):
         self.config["policy"]["action_precedence"] = "main_first"
@@ -170,7 +243,7 @@ class RoutingTests(unittest.TestCase):
         self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
         self.assertNotIn("TOOL_RESULT_SENTINEL", states[1])
 
-    def test_follow_up_state_preserves_original_request_with_long_result(self):
+    def test_oversized_follow_up_hands_to_main_without_losing_evidence(self):
         self.config["policy"]["action_precedence"] = "main_first"
         self.config["policy"]["max_state_chars"] = 256
         self.config["policy"]["actions"] = {
@@ -193,8 +266,118 @@ class RoutingTests(unittest.TestCase):
         self.assertTrue(self.runtime.record_host_result(agent, "memory_load", "R" * 520))
         agent.loop_data.iteration = 1
         self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
-        self.assertIn("USER_TASK_SENTINEL", states[1])
-        self.assertLessEqual(len(states[1]), 256)
+        self.assertEqual(len(states), 1)
+        self.assertEqual(self.timeline_events[-1][0][1], "Handed off to Main")
+
+    def test_request_field_binds_typed_argument(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        self.config["policy"]["actions"] = {
+            "lookup": {"tool_name": "memory_load", "tool_args": {},
+                       "argument_bindings": {"query": {"source": "request",
+                           "prefix": "Load issue ", "suffix": "", "value_type": "integer"}}}}
+        async def decide(state, choices):
+            return types.SimpleNamespace(choice="lookup", confidence=0.99, backend="jev")
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        agent.last_user_message = types.SimpleNamespace(output_text=lambda: "Load issue 17")
+        action = asyncio.run(self.runtime.main_decision(agent))
+        self.assertEqual(json.loads(action)["tool_args"], {"query": 17})
+
+    def test_result_field_binds_dependent_action_after_host_record(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        self.config["policy"]["actions"] = {
+            "search": {"tool_name": "memory_load", "tool_args": {"query": "project"},
+                       "allow_result_bindings": True},
+            "detail": {"tool_name": "memory_load", "tool_args": {},
+                       "argument_bindings": {"query": {"source": "result",
+                           "from_action": "search", "path": ["items", 0, "id"],
+                           "value_type": "integer"}}}}
+        choices_seen = []
+        async def decide(state, choices):
+            choices_seen.append(set(choices))
+            return types.SimpleNamespace(choice="search" if len(choices_seen) == 1 else "detail",
+                                         confidence=0.99, backend="jev")
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        self.assertEqual(json.loads(asyncio.run(self.runtime.main_decision(agent)))["tool_args"],
+                         {"query": "project"})
+        self.assertNotIn("detail", choices_seen[0])
+        self.assertTrue(self.runtime.record_host_result(
+            agent, "memory_load", '{"items":[{"id":17}]}'))
+        agent.loop_data.iteration = 1
+        second = asyncio.run(self.runtime.main_decision(agent))
+        self.assertEqual(json.loads(second)["tool_args"], {"query": 17})
+        self.assertIn("detail", choices_seen[1])
+        self.assertFalse(self.runtime.should_decide(agent))
+
+    def test_successive_results_remain_in_decider_state(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        self.config["policy"]["actions"] = {
+            name: {"tool_name": "memory_load", "tool_args": {"query": name},
+                   "share_result_with_backend": True}
+            for name in ("first", "second", "third")}
+        states = []
+        async def decide(state, choices):
+            states.append(state)
+            return types.SimpleNamespace(choice={1: "first", 2: "second", 3: "main"}[len(states)],
+                                         confidence=0.99, backend="jev")
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        self.assertIsNotNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertTrue(self.runtime.record_host_result(agent, "memory_load", "FIRST_SENTINEL"))
+        agent.loop_data.iteration = 1
+        self.assertIsNotNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertTrue(self.runtime.record_host_result(agent, "memory_load", "SECOND_SENTINEL"))
+        agent.loop_data.iteration = 2
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertIn("FIRST_SENTINEL", states[2])
+        self.assertIn("SECOND_SENTINEL", states[2])
+
+    def test_revoked_binding_permission_hands_off(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        search = {"tool_name": "memory_load", "tool_args": {"query": "project"},
+                  "allow_result_bindings": True}
+        self.config["policy"]["actions"] = {
+            "search": search,
+            "detail": {"tool_name": "memory_load", "tool_args": {},
+                       "argument_bindings": {"query": {"source": "result",
+                           "from_action": "search", "path": ["id"],
+                           "value_type": "integer"}}}}
+        async def decide(state, choices):
+            return types.SimpleNamespace(choice="search", confidence=0.99, backend="jev")
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        self.assertIsNotNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertTrue(self.runtime.record_host_result(agent, "memory_load", '{"id":17}'))
+        search["allow_result_bindings"] = False
+        agent.loop_data.iteration = 1
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
+
+    def test_mcp_result_never_finishes_as_raw_response(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        self.config["policy"]["actions"] = {
+            "lookup": {"tool_name": "github_mcp_server.get_pull_request_status",
+                       "tool_args": {"pull_request_number": 11},
+                       "return_result_to_user": True}}
+        async def decide(state, choices):
+            return types.SimpleNamespace(choice="lookup", confidence=0.99, backend="jev")
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        self.assertIsNotNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertTrue(self.runtime.record_host_result(
+            agent, "github_mcp_server.get_pull_request_status", '{"state":"OPEN"}'))
+        agent.loop_data.iteration = 1
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
 
     def test_changed_action_during_decision_cannot_dispatch(self):
         self.config["policy"]["action_precedence"] = "main_first"
@@ -315,14 +498,19 @@ class RoutingTests(unittest.TestCase):
             "dependent": {"tool_name": "memory_load", "tool_args": {"query": "dependent"}},
         }
         states = []
+        correction_release = asyncio.Event()
+        second_choice_entered = asyncio.Event()
+        second_choice_release = asyncio.Event()
 
         async def correction(agent, decision_state, timeout):
+            await correction_release.wait()
             return {"kind": "correction", "text": "Use the verified next step."}
 
         async def decide(state, choices):
             states.append(state)
             if len(states) == 2:
-                await asyncio.sleep(0)  # Main finishes before Jev returns its action.
+                second_choice_entered.set()
+                await second_choice_release.wait()
             selected = {1: "main", 2: "independent", 3: "dependent"}[len(states)]
             return types.SimpleNamespace(choice=selected, confidence=0.99, backend="jev")
 
@@ -333,7 +521,13 @@ class RoutingTests(unittest.TestCase):
         agent.loop_data = types.SimpleNamespace(iteration=0)
 
         async def scenario():
-            first = await self.runtime.main_decision(agent)
+            first_task = asyncio.create_task(self.runtime.main_decision(agent))
+            await second_choice_entered.wait()
+            correction_release.set()
+            pending = getattr(agent, self.runtime._TURN_STATE)["main_task"]
+            self.assertIsNotNone(await pending)
+            second_choice_release.set()
+            first = await first_task
             self.assertEqual(json.loads(first)["tool_args"]["query"], "independent")
             self.assertTrue(self.runtime.record_host_result(agent, "memory_load", "Observed fact"))
             agent.loop_data.iteration = 1
@@ -540,6 +734,36 @@ class RoutingTests(unittest.TestCase):
             self.assertNotIn("Main supplied final response", [event[0][1] for event in self.timeline_events])
         asyncio.run(scenario())
 
+    def test_changed_policy_discards_pending_main_correction(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        independent = {"tool_name": "memory_load", "tool_args": {"query": "safe"},
+                       "independent_while_main": True}
+        self.config["policy"]["actions"] = {"independent": independent}
+        release = asyncio.Event()
+        entered = asyncio.Event()
+        async def correction(agent, state, timeout):
+            entered.set()
+            await release.wait()
+            return {"kind": "correction", "text": "Outdated guidance"}
+        calls = 0
+        async def decide(state, choices):
+            nonlocal calls
+            calls += 1
+            return types.SimpleNamespace(choice="main" if calls == 1 else "wait_main",
+                                         confidence=0.99, backend="jev")
+        self.runtime._run_main_correction = correction
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        async def scenario():
+            pending = asyncio.create_task(self.runtime.main_decision(agent))
+            await entered.wait()
+            independent["description"] = "Changed during Main reasoning"
+            release.set()
+            self.assertIsNone(await pending)
+            self.assertFalse(getattr(agent, self.runtime._TURN_STATE)["main_guidance"])
+        asyncio.run(scenario())
+
     def test_failed_advisory_does_not_unblock_dependent_action(self):
         self.config["policy"]["action_precedence"] = "main_first"
         self.config["policy"]["actions"] = {
@@ -592,6 +816,33 @@ class RoutingTests(unittest.TestCase):
         self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
         self.assertIsNone(asyncio.run(self.runtime.main_decision(Agent())))
         self.assertEqual(calls, 3)
+
+    def test_main_model_change_during_corrected_choice_cannot_dispatch(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        self.config["policy"]["actions"] = {
+            "independent": {"tool_name": "memory_load", "tool_args": {"query": "safe"},
+                            "independent_while_main": True},
+            "dependent": {"tool_name": "memory_load", "tool_args": {"query": "after advice"}},
+        }
+        calls = 0
+
+        async def decide(state, choices):
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                self.config["main"]["model"] = "replacement-model"
+            return types.SimpleNamespace(choice={1: "main", 2: "wait_main", 3: "dependent"}[calls],
+                                         confidence=0.99, backend="jev")
+
+        async def correction(agent, state, timeout):
+            return {"kind": "correction", "text": "The dependent action is now safe."}
+
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime._run_main_correction = correction
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(Agent())))
+        self.assertEqual(calls, 3)
+        self.assertEqual(self.timeline_events[-1][1]["detail"], "Main correction became stale")
 
 
 if __name__ == "__main__":

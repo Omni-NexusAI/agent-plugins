@@ -40,20 +40,44 @@ action dispatch. A local
 decision endpoint needs no key unless your server requires one.
 
 Main can choose only from `policy.actions` and the Main fallback. Each action
-contains a fixed `tool_name` and nonempty `tool_args`. The decision model cannot generate
-arbitrary arguments. Agent Zero still validates and executes the chosen tool
+declares a fixed `tool_name` and fixed arguments or typed, bounded
+`argument_bindings`. Bindings may extract an unambiguous request field or a
+validated field from a complete, masked JSON result of a prior opted-in action.
+The decision model cannot generate arbitrary arguments. Agent Zero still validates and executes the chosen tool
 under its usual permissions and history. After a nonterminating action, the
 plugin waits for the host to record that tool's result before requesting another
 finite decision. The action count is bounded by `max_actions_per_turn` (default
 three, maximum eight), and an action ID cannot repeat within a turn. A tool
-error or missing result goes to Main. Empty or uncertain choices, service
+error or missing result goes to Main. A raw MCP result never finishes a user
+request: Main receives recorded evidence and writes a useful final answer
+when prose is needed, without repeating a successful call unless evidence is
+insufficient. Empty or uncertain choices, service
 errors, and open-ended work also go to Main. With an empty action map, System 1
 has no direct actions to dispatch. If Auxiliary Model Roles is installed and
 configured, System 1 may delegate a Tool or Coding goal through Agent Zero's
 normal `auxiliary_delegate` tool. The specialist result returns to Main.
 
-Utility can bypass a model call only for an explicitly configured exact system
-and message pair with predeclared response choices. The finite backend chooses
+Utility can also bypass a model call for two verified Agent Zero memory call
+shapes: an unambiguous current request can become the search query, and a
+small enumerated candidate list can receive a validated JSON list of relevant
+indices. Unknown or changed shapes, malformed or oversized candidates,
+low-confidence or failed decisions use the complete original Utility call.
+At an initial recall, Agent Zero has already stored the current message in
+history; the query fast path accepts it only when the isolated `user:` history
+envelope decodes to the same sanitized current-user fields as the `user:`
+request, optionally after the one pinned host bootstrap greeting. Any prior,
+other AI, or tool history uses Utility. Both system prompts are pinned by normalized template content, so a
+host template revision also uses Utility until reviewed.
+Memory ingestion, summaries, chat titles, and other generated text remain with
+the Utility model. The selected embedding model still creates vectors, and
+the existing memory index is preserved. With only Embedding System One Mode
+enabled, the Decider can add a bounded provenance reminder to recognized memory
+query, filtering, or ingestion calls before Utility runs. It never replaces the
+selected Utility or embedding model, vectors, index, or memory write.
+
+Separately, an optional fixed route can bypass a non-memory Utility call only
+for an explicitly configured exact system and message pair with predeclared
+response choices. The finite backend chooses
 one response or `ordinary`; a confidence below the policy threshold, a changed
 request or configuration, and any backend error use the original Utility model.
 Chat backends cannot authorize fixed responses. Each response is limited to
@@ -62,14 +86,19 @@ The exact system instruction, message, and configured response choices are sent
 to the chosen decision backend; configure these routes only with content that
 backend may receive. The combined decision payload is bounded by
 `max_state_chars`, and oversized routes use the original Utility model.
-The adapter keeps per-agent `calls`, `decisions`, `bypassed`, and `fallbacks` counters,
-plus cumulative `decision_seconds` and `fallback_model_seconds`, without
-retaining prompts or secrets. `fallback_model_seconds` times only a model call
-made after a previously selected fixed response is revoked; it does not measure
-ordinary Utility generation. The counters are available through
-`helpers.utility.metrics(agent)` for local inspection and tests; they reset
-with the agent object. Unmatched and open-ended calls retain the existing
-conservative Utility guidance and normal model path.
+The adapter keeps per-agent bypass, fallback, and ordinary-generation counts
+and separate Decider and Utility timing without retaining prompts or secrets.
+The read-only per-chat plugin metrics endpoint exposes these counts for
+practical comparisons. Count avoided Utility calls as `bypassed` divided by
+completed Utility calls (`bypassed + ordinary_generations + fallback_model_calls`).
+In-flight calls are excluded from that denominator.
+The endpoint also reports count and elapsed seconds at the host's prompt
+preparation, foreground/background Main, tool execution, and memory recall hook
+boundaries. Delayed recall can continue after its hook span. Ingestion runs in
+a host background thread and its index-write time is not measured by these
+hooks. The measured spans can overlap during Main advice;
+compare them separately and use measured prompt-to-final-answer wall time for
+the full task.
 
 For example, a known Utility caller with exact prompt text can opt into two
 fixed outputs:
@@ -86,17 +115,18 @@ utility:
 
 Match against the text after Agent Zero's secret masking hook. Do not configure
 fixed outputs for summaries, query generation, memory ingestion, or other work
-that needs generated content.
-
-Embedding decisions guide the existing memory plugin's query preparation and
-ingestion summaries; the configured embedding model and vector index remain
-unchanged. The plugin page has Fast, Balanced, and Conservative starting
+that needs generated content. The adapter rejects a fixed route for every
+recognized built-in `_memory` prompt, including query, filtering, summaries,
+extraction, consolidation, and history prompts, even if it exactly matches a
+configured route. Query and filter bypasses require their current exact
+normalized host templates; a changed but memory-shaped template is kept on the
+original Utility path. The plugin page has Fast, Balanced, and Conservative starting
 presets plus adjustable thresholds and bounded monitoring limits.
 The first monitor observes native user interventions while Main works and asks
 the host loop to process high-priority ones; it stops after its configured time
 or check limit. Other event sources require a future host adapter.
 
-## Fixed action example
+## Configured action example
 
 ```yaml
 policy:
@@ -131,3 +161,11 @@ System 1 decisions or apply a late correction.
 Only configure actions whose exact tool schema and permissions you have
 verified on the installed Agent Zero version. There is no automatic local to
 hosted fallback.
+
+For dynamic arguments, `argument_bindings` can supplement fixed `tool_args`.
+Each binding names a `source` (`request` or `result`), a supported `value_type`,
+and bounded extraction rules. A result binding names `from_action` and a JSON
+`path`; the source action must set `allow_result_bindings: true`. The plugin
+rejects unknown types, malformed values, incomplete results, and changed
+source definitions. Keep action IDs distinct and configure only fields whose
+host tool schema has been verified.

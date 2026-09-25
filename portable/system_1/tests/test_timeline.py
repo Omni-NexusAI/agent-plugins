@@ -61,6 +61,15 @@ class TimelineTests(unittest.TestCase):
         self.timeline.start_main_step(self.agent)
         self.assertEqual(len(self.logged), 1)
 
+    def test_observation_step_contains_tool_name_without_result(self):
+        self.timeline.record_main_observation(self.agent, "github_mcp_server.get_pull_request")
+        self.assertEqual(len(self.logged), 1)
+        item = self.logged[0]
+        self.assertTrue(item["id"].startswith("system1-main-"))
+        self.assertEqual(item["kvps"]["Route"], "Observed tool result")
+        self.assertEqual(item["kvps"]["Action"], "github_mcp_server.get_pull_request")
+        self.assertNotIn("Private request", str(item))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -67,3 +67,23 @@ def finish_main_step(agent, route: str, *, confidence: float | None = None,
         record["item"].update(heading=f"System 1 · Main: {route.lower()}", kvps=kvps)
     except Exception:
         return
+
+
+def record_main_observation(agent, tool_name: str) -> None:
+    """Show that a submitted action produced a host-recorded result.
+
+    Keep the result in native Tool history; this Info step contains no result
+    text, arguments, or request content.
+    """
+    try:
+        if not isinstance(tool_name, str) or not tool_name:
+            return
+        agent.context.log.log(
+            type="info", heading="System 1 · Main: observed tool result",
+            id=f"system1-main-{uuid.uuid4().hex}",
+            kvps={"Route": "Observed tool result", "Action": tool_name[:120],
+                  "Outcome": "Available for the next decision"},
+        )
+    except Exception:
+        # Logging cannot change whether the host's tool result is accepted.
+        return

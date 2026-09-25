@@ -1,6 +1,13 @@
 from helpers.extension import Extension
-from usr.plugins.system_1.helpers.runtime import memory_decision, utility_decision
 from usr.plugins.system_1.helpers.utility import install_fixed_utility_response, metrics
+try:
+    from usr.plugins.system_1.helpers.utility import (
+        install_embedding_memory_guidance, install_memory_utility_response,
+        install_utility_measurement)
+except ImportError:  # A hot reload may briefly see the prior helper module.
+    install_embedding_memory_guidance = None
+    install_memory_utility_response = None
+    install_utility_measurement = None
 
 
 class SystemOneUtility(Extension):
@@ -8,18 +15,19 @@ class SystemOneUtility(Extension):
         if self.agent:
             metrics(self.agent)["calls"] += 1
             route = await install_fixed_utility_response(self.agent, call_data)
-            if route.bypassed or route.attempted:
+            if route.bypassed:
                 return
-            system = call_data.get("system", "")
-            if isinstance(system, str):
-                if "previous memories are stored" in system:
-                    purpose = "retrieval query preparation"
-                elif "HISTORY worth memorizing" in system:
-                    purpose = "memory ingestion"
-                elif "enumerated list of MEMORIES" in system:
-                    purpose = "memory retrieval filtering"
-                else:
-                    purpose = ""
-                if purpose and await memory_decision(self.agent, call_data.get("message", ""), purpose) == "precise":
-                    call_data["system"] += "\nSystem 1 guidance: keep only facts directly relevant to this task and retain the original meaning."
-            await utility_decision(self.agent, call_data)
+            if route.attempted:
+                if install_utility_measurement:
+                    install_utility_measurement(self.agent, call_data, outcome="fallback")
+                return
+            memory_route = (await install_memory_utility_response(self.agent, call_data)
+                            if install_memory_utility_response else route)
+            if memory_route.bypassed:
+                return
+            if install_embedding_memory_guidance:
+                await install_embedding_memory_guidance(self.agent, call_data)
+            if install_utility_measurement:
+                install_utility_measurement(
+                    self.agent, call_data,
+                    outcome="fallback" if memory_route.attempted else "ordinary")

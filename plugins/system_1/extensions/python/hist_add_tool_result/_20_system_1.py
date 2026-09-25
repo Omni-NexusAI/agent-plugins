@@ -19,11 +19,14 @@ class SystemOneToolResult(Extension):
             masked = get_secrets_manager(self.agent.context).mask_values(result)
             if not isinstance(masked, str):
                 return
-            record_host_result(
+            observed = record_host_result(
                 self.agent,
                 data.get("tool_name", ""),
                 masked,
             )
+            if observed:
+                from usr.plugins.system_1.helpers.timeline import record_main_observation
+                record_main_observation(self.agent, data.get("tool_name", ""))
         except Exception:
             # Fail closed for result sharing without changing host history.
             return
