@@ -133,6 +133,46 @@ class UtilityMemoryTests(unittest.TestCase):
         self.assertIn("Candidate 0: Agent Zero System 1 plan", self.states[0][0])
         self.assertIn("Conversation history: Earlier chat", self.states[0][0])
         self.assertIn("keep_0_2", self.states[0][1])
+        self.assertEqual(self.utility.metrics(self.agent)["memory_filter_gate"], {
+            "seen": 1, "decision_attempted": 1, "bypass_installed": 1})
+
+    def test_long_candidate_uses_decider_only_when_full_payload_fits(self):
+        candidate = "relevant detail " * 70
+        self.assertGreater(len(candidate), 800)
+        request = self.agent_zero_user_envelope("find the System 1 plan")
+        message = self.filter_prompt(request).replace(
+            "{0: 'Agent Zero System 1 plan', 1: 'unrelated shopping list', "
+            "2: 'System 1 test evidence'}", repr({0: candidate}))
+        original = OriginalModel()
+        call_data = {"system": self.utility.MEMORY_FILTER_SYSTEM,
+                     "message": message, "model": original}
+        self.choice = types.SimpleNamespace(choice="keep_0", confidence=0.99)
+        self.assertTrue(asyncio.run(self.utility.install_memory_utility_response(
+            self.agent, call_data)))
+        self.assertEqual(self.call(call_data), ("[0]", ""))
+        self.assertEqual(original.calls, [])
+
+        self.config["policy"]["max_state_chars"] = 200
+        oversized = {"system": self.utility.MEMORY_FILTER_SYSTEM,
+                     "message": message, "model": OriginalModel()}
+        self.assertFalse(asyncio.run(self.utility.install_memory_utility_response(
+            self.agent, oversized)))
+        self.assertEqual(self.utility.metrics(self.agent)["memory_filter_gate"]
+                         ["payload_oversize"], 1)
+
+    def test_low_confidence_filter_preserves_original_utility(self):
+        original = OriginalModel()
+        call_data = {"system": self.utility.MEMORY_FILTER_SYSTEM,
+                     "message": self.filter_prompt(
+                         self.agent_zero_user_envelope("find the System 1 plan")),
+                     "model": original}
+        self.choice = types.SimpleNamespace(choice="keep_0", confidence=0.4)
+        self.assertFalse(asyncio.run(self.utility.install_memory_utility_response(
+            self.agent, call_data)))
+        self.assertIs(call_data["model"], original)
+        gate = self.utility.metrics(self.agent)["memory_filter_gate"]
+        self.assertEqual(gate["fallback"], 1)
+        self.assertEqual(gate["reason_confidence"], 1)
 
     def test_malformed_or_unbounded_memory_input_uses_original_utility(self):
         original = OriginalModel()
@@ -141,6 +181,21 @@ class UtilityMemoryTests(unittest.TestCase):
         self.assertFalse(asyncio.run(self.utility.install_memory_utility_response(
             self.agent, malformed)))
         self.assertEqual(self.states, [])
+        self.assertEqual(
+            self.utility.metrics(self.agent)["memory_filter_gate"]["shape_ineligible"], 1)
+        self.assertEqual(
+            self.utility.metrics(self.agent)["memory_filter_gate"]["reason_template"], 1)
+
+        self.config["policy"]["max_state_chars"] = 3
+        valid_filter = {"system": self.utility.MEMORY_FILTER_SYSTEM,
+                        "message": self.filter_prompt(
+                            self.agent_zero_user_envelope("find the System 1 plan")),
+                        "model": original}
+        self.assertFalse(asyncio.run(self.utility.install_memory_utility_response(
+            self.agent, valid_filter)))
+        self.assertEqual(
+            self.utility.metrics(self.agent)["memory_filter_gate"]["payload_oversize"], 1)
+        self.config["policy"]["max_state_chars"] = 4000
 
         oversized = {"system": self.utility.MEMORY_QUERY_SYSTEM,
                      "message": self.query_prompt("word " * 40), "model": original}
@@ -227,6 +282,9 @@ class UtilityMemoryTests(unittest.TestCase):
         self.assertEqual(record["fallbacks"], 1)
         self.assertEqual(record["fallback_model_calls"], 1)
         self.assertGreaterEqual(record["fallback_model_seconds"], 0)
+        self.assertEqual(record["model_call_categories"]["memory_query"]["calls"], 1)
+        self.assertGreaterEqual(
+            record["model_call_categories"]["memory_query"]["seconds"], 0)
 
     def test_fixed_route_never_bypasses_verified_memory_ingestion(self):
         original = OriginalModel()

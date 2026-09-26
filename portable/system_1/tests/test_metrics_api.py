@@ -27,6 +27,8 @@ class MetricsApiTests(unittest.TestCase):
         api.Response = Response
         stages = types.ModuleType("usr.plugins.system_1.helpers.stage_metrics")
         stages.snapshot = lambda agent: {"tool_execution": {"calls": 1, "seconds": 0.5}}
+        stages.spans_snapshot = lambda agent: {"spans": [
+            {"stage": "tool_execution", "start": 1.0, "end": 1.5}], "dropped": 0}
         self.modules = patch.dict(sys.modules, {
             "agent": agent, "helpers": helpers, "helpers.api": api,
             stages.__name__: stages})
@@ -46,6 +48,14 @@ class MetricsApiTests(unittest.TestCase):
         active = types.SimpleNamespace(
             _system_1_utility_metrics={"calls": 3, "bypassed": 1,
                                        "decision_seconds": 0.25,
+                                       "model_call_categories": {
+                                           "memory_query": {"calls": 1, "seconds": 1.5},
+                                           "private_prompt": {"calls": 1, "seconds": 99}},
+                                       "memory_filter_gate": {"seen": 2,
+                                                              "payload_oversize": 1,
+                                                              "reason_candidate_length": 1,
+                                                              "reason_confidence": 1,
+                                                              "private_prompt": 100},
                                        "private_prompt": "do not return"})
         self.contexts["test-chat"] = types.SimpleNamespace(agent0=active)
         output = asyncio.run(self.module.Metrics().process(
@@ -54,8 +64,15 @@ class MetricsApiTests(unittest.TestCase):
         self.assertEqual(output["utility"]["calls"], 3)
         self.assertEqual(output["utility"]["bypassed"], 1)
         self.assertEqual(output["utility"]["decision_seconds"], 0.25)
+        self.assertEqual(output["utility"]["model_call_categories"], {
+            "memory_query": {"calls": 1, "seconds": 1.5}})
+        self.assertEqual(output["utility"]["memory_filter_gate"]["seen"], 2)
+        self.assertEqual(output["utility"]["memory_filter_gate"]["payload_oversize"], 1)
+        self.assertEqual(output["utility"]["memory_filter_gate"]["reason_candidate_length"], 1)
+        self.assertEqual(output["utility"]["memory_filter_gate"]["reason_confidence"], 1)
         self.assertEqual(output["stages"]["tool_execution"],
                          {"calls": 1, "seconds": 0.5})
+        self.assertEqual(output["stage_spans"]["spans"][0]["end"], 1.5)
         self.assertNotIn("private_prompt", str(output))
 
 

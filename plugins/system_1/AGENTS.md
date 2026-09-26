@@ -33,6 +33,9 @@ When System 1 chooses `wait_main` with independent actions offered, record the
 number offered and actual wait duration. An offered action is policy eligible,
 not necessarily appropriate for the request; do not label it as missed work
 without checking its relevance and dependencies.
+The metrics API may expose at most 256 completed, relative stage spans, with a
+dropped-span count. Keep spans limited to allowlisted stage names and monotonic
+times; do not attach prompt or tool contents. Aggregate totals remain available.
 When System 1 finishes after observed tools, a foreground Main call receives
 a bounded continuation note listing validated tool names and masked result
 excerpts only for actions whose policy permits sharing results with the
@@ -42,7 +45,11 @@ history for verification, and asks it to finish without repeating a recorded
 call unless necessary. It is not added to background advisory calls or later
 user turns, and never copies request text, tool arguments, or credentials.
 The read-only metrics API exposes per-agent Utility bypass and fallback counts
-and timing, without prompts, responses, or credentials. Plugin-owned timing
+and timing, without prompts, responses, or credentials. Original-Utility
+model-call timing is grouped into allowlisted memory-query, memory-filter,
+memory-ingestion, and other categories; never expose call text through those
+metrics. Filter eligibility counters may expose only allowlisted reason names
+and counts, never candidates or request text. Plugin-owned timing
 hooks bracket host prompt preparation, foreground/background Main calls, tool
 execution, and the memory-recall hook span. Delayed recall may outlive that span;
 ingestion is deferred by the host at monologue end, so this hook layer does not
@@ -51,6 +58,9 @@ overlap; never add them to infer wall time. Incomplete spans are omitted.
 Utility bypasses only
 verified host memory-query and bounded candidate-filter prompt shapes; it
 returns validated query text or JSON indices in the normal Utility callback.
+Candidate text is never truncated for a decision: a verified candidate may be
+up to 4000 characters, but the complete encoded state and finite choices must
+still fit the configured decision payload limit or the original Utility call runs.
 Unknown shapes, errors, and generative work use the original Utility model.
 The query fast path accepts first-turn history only when its isolated `user:`
 envelope decodes to the same sanitized current-user fields as the `user:`

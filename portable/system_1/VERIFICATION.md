@@ -4,7 +4,7 @@ This record describes the Agent Zero test instance used for the System 1 expansi
 
 ## Implemented checks
 
-- The portable Python suite and assembled Agent Zero package are checked together. The package must import without the monorepo. The dynamic-control revision has 155 passing focused tests and 44 assembled files; the updated package has been installed in the existing Agent Zero test container for live checks.
+- The portable Python suite and assembled Agent Zero package are checked together. The package must import without the monorepo. The current revision has 163 passing focused tests and 44 assembled files; the updated package has been installed in the existing Agent Zero test container for live checks.
 - Agent Zero remains the executor for native and MCP tools. System 1 selects bounded actions; later decisions consume host-recorded results. Main writes the final answer when the evidence needs prose.
 - Utility direct memory-query and bounded relevance choices are eligible only for verified host call shapes. Unknown, changed, failed, or uncertain calls use the complete original Utility call. Embedding mode does not replace vectors or the index.
 - The plugin settings page and S1 timeline were inspected in the rendered host UI at desktop and narrow widths. The shared Decider card used adjacent native model field styles and fit the narrow modal; S1 steps expanded beside unchanged Gen and MCP records at both widths. After the final package update, opening the plugin settings moved keyboard focus into the modal, and reverse Tab from the close button wrapped to Cancel instead of reaching the background list. Invalid action JSON displayed a field error, blocked Save, and kept focus in the field; Cancel then reopened with the original valid value and initial focus on the first select. A temporary unreachable Decider endpoint made the rendered status show `unavailable`; after automatic config restoration, Check connection showed the disabled-button `Checking…` state followed by `available`. The temporary viewport override and inspection tabs were removed afterward.
@@ -90,3 +90,79 @@ alternatives still require task-relevance and dependency review before they
 can be counted as missed action opportunities. Repeated live arrival-rate and
 wait analysis remains to be run; no throughput conclusion follows from the
 existing mixed-task trace alone.
+
+For longer mixed-task comparisons, the per-chat metrics API now retains at
+most 256 completed stage intervals relative to its first measurement and
+reports how many older intervals were dropped. This allows actual Main
+background/tool overlap to be computed rather than inferred from aggregate
+seconds. The focused tests verify overlapping intervals and that no prompt
+content is returned.
+
+A single local coding-plus-retrieval turn completed in 138.95 s with Main
+System One Mode enabled. System One submitted an independent native skills
+search and GitHub PR-status lookup through Agent Zero; Main used the native
+code tool, recorded a passing local `test_counter.py` check, delegated a
+bounded README lookup back to System One, and returned a substantive final
+answer. The first harness pass falsely marked the code check missing because
+Agent Zero records code execution as `code_exe` rather than `tool`; it also
+treated a harmless LF-to-CRLF rewrite of the test fixture as a content change.
+Replaying the saved host trace after correcting those checks confirms the
+code action and ordering; a separate sanitized replay report records the
+source chat-file hash and corrected artifact checks. This is one live turn,
+not a reliability or speed
+claim. Relative stage intervals show two memory-recall spans near the host's
+30 s timeout, and the chat timeline reports both recalls timed out. Utility
+System One Mode was off in this coding trial. Saved settings and the memory
+index were verified restored and unchanged.
+
+A separate one-repetition matched memory-retrieval pair used the same saved
+Default model preset and bounded search limits with Main System One Mode off.
+Utility System One Mode on finished in 59.39 s and bypassed one query-writing
+Utility call; mode off finished in 77.64 s. Both recall operations timed out
+and returned no memories, so neither passed a retrieval-accuracy gate. Both
+recorded about 29 s of ordinary Utility model generation, and the full-turn
+difference was mostly Main foreground time. This pair does not establish a
+memory speedup. Saved System One and memory settings were restored, and FAISS
+and pickle index hashes remained unchanged.
+
+After adding allowlisted Utility model-call category timing, another matched
+single-turn pair used that same preset, corpus, and bounded limits. Utility
+System One Mode on completed in 28.38 s, recalled three memories and two
+solutions, and passed bounded answer checks; its Decider query choice took
+0.37 s and the ordinary Utility memory-filter model call took 0.80 s. The
+mode-off client request reached its 180 s deadline without a final answer;
+at that point its recorded foreground Main time was about 139 s, while its
+completed Utility model calls totaled 1.06 s in the saved deadline report.
+The host continued the request and recorded a final response about 347 s
+after the user message; a later read-only metrics snapshot then showed about
+7.6 s of completed memory-query and filter model calls. The on trial recalled
+three memories and two solutions; the eventual off trial recalled three and
+three, so retrieved-item equality was not established. This pair is an
+incomplete client control and does not prove a speed advantage. Both
+settings objects were verified restored and the index hashes matched. The
+host may continue processing a chat after the synchronous client timeout;
+do not reuse that timed-out chat as a completed control result.
+
+One post-review Utility-on diagnostic trial completed in 37.31 s with one
+memory and two solutions recalled. Decider bypassed the direct query in
+0.55 s; the remaining original Utility memory-filter call took 13.56 s, and
+the measured memory-recall hook took 15.65 s. This identifies relevance
+filtering as a material variable cost in that turn, but provides no matched
+complete-task speed claim. Filter eligibility reason counters then identified
+one real retrieved candidate exceeding the former 800-character per-candidate
+cap. The cap was raised to 4000 characters without truncating candidate text;
+the complete encoded decision remains bounded by `max_state_chars`. A live
+41.13 s retrieval trial then reached the 4000-byte payload gate, and a 41.80 s
+trial with the raised candidate cap also reached that gate. A temporary
+8000-byte policy trial completed in 51.03 s but still exceeded the payload
+gate. At the plugin's 16000-byte policy ceiling, two Utility-on trials
+completed in 39.48 s and 44.05 s and reached the Decider. Both fell back to
+the original Utility filter; the second trial's reason counter confirmed a
+choice below the configured confidence threshold, with 0.85 s of added
+decision time and 9.27 s in the original Utility filter. The earlier 16000-byte
+trial did not record its fallback reason. All these are single, unmatched
+diagnostics, not evidence of faster memory retrieval. Every trial restored
+the saved System 1 and memory settings and preserved the FAISS and pickle
+index hashes. Do not lower the confidence threshold or classify candidates
+independently: the host's relevance contract compares candidates for conflicts,
+duplicates, recency, and completeness.

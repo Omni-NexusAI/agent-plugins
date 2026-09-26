@@ -18,7 +18,7 @@ _METRICS = "_system_1_utility_metrics"
 _MAX_RESPONSE_CHARS = 4000
 _MAX_DIRECT_QUERY_CHARS = 512
 _MAX_MEMORY_CANDIDATES = 6
-_MAX_MEMORY_CANDIDATE_CHARS = 800
+_MAX_MEMORY_CANDIDATE_CHARS = 4000
 _MAX_MEMORY_CALL_CHARS = 12000
 _INITIAL_BOOTSTRAP_RECORD_CHARS = 545
 _INITIAL_BOOTSTRAP_RECORD_SHA256 = (
@@ -203,6 +203,8 @@ def metrics(agent) -> dict:
         "fallback_model_seconds": 0.0, "ordinary_model_seconds": 0.0,
     }.items():
         current.setdefault(key, value)
+    current.setdefault("model_call_categories", {})
+    current.setdefault("memory_filter_gate", {})
     return current
 
 
@@ -402,35 +404,47 @@ def _query_request(message: str) -> str | None:
     return _direct_host_request(request)
 
 
-def _memory_filter_input(message: str) -> tuple[str, str, list[str]] | None:
+def _memory_filter_input(message: str, reason_out: dict | None = None
+                         ) -> tuple[str, str, list[str]] | None:
     """Parse the host's bounded Python-dict candidate prompt without guessing."""
+    def reject(reason: str):
+        if reason_out is not None:
+            reason_out["reason"] = reason
+        return None
+
     prefix = ("# Provide array of indices of relevant memories and solutions in relation "
               "to user message and history:\n\n## Memories and solutions:\n")
     request_marker = "\n\n## User message:\n"
     history_marker = "\n\n## History for context:\n"
-    if not message.startswith(prefix) or len(message) > _MAX_MEMORY_CALL_CHARS:
-        return None
+    if not message.startswith(prefix):
+        return reject("template")
+    if len(message) > _MAX_MEMORY_CALL_CHARS:
+        return reject("message_length")
     raw_candidates, marker, remaining = message[len(prefix):].partition(request_marker)
     if not marker:
-        return None
+        return reject("template")
     request, marker, history = remaining.partition(history_marker)
     if not marker or "\n\n## " in request:
-        return None
+        return reject("template")
     try:
         values = ast.literal_eval(raw_candidates)
     except (SyntaxError, ValueError, MemoryError, RecursionError):
-        return None
-    if not isinstance(values, dict) or not 1 <= len(values) <= _MAX_MEMORY_CANDIDATES:
-        return None
+        return reject("candidate_format")
+    if not isinstance(values, dict):
+        return reject("candidate_format")
+    if not 1 <= len(values) <= _MAX_MEMORY_CANDIDATES:
+        return reject("candidate_count")
     if (any(type(key) is not int for key in values)
             or set(values) != set(range(len(values)))):
-        return None
+        return reject("candidate_format")
     candidates = [values[index] for index in range(len(values))]
     if any(not isinstance(value, str) or not value.strip()
-           or len(value) > _MAX_MEMORY_CANDIDATE_CHARS for value in candidates):
-        return None
+           for value in candidates):
+        return reject("candidate_format")
+    if any(len(value) > _MAX_MEMORY_CANDIDATE_CHARS for value in candidates):
+        return reject("candidate_length")
     current_request = _direct_host_request(request)
-    return (current_request, history, candidates) if current_request else None
+    return (current_request, history, candidates) if current_request else reject("request_shape")
 
 
 def _subset_choices(candidates: list[str]) -> tuple[dict[str, str], dict[str, str]]:
@@ -448,8 +462,9 @@ def _subset_choices(candidates: list[str]) -> tuple[dict[str, str], dict[str, st
 class MeasuredUtilityModel:
     """Transparent host-model wrapper used only to time a verified call shape."""
 
-    def __init__(self, original, agent, outcome: str):
+    def __init__(self, original, agent, outcome: str, category: str):
         self.original, self.agent, self.outcome = original, agent, outcome
+        self.category = category
 
     def __getattr__(self, name):
         return getattr(self.original, name)
@@ -461,6 +476,7 @@ class MeasuredUtilityModel:
         finally:
             record = metrics(self.agent)
             elapsed = max(0.0, time.monotonic() - start)
+            _record_model_call(record, self.category, elapsed)
             if self.outcome == "fallback":
                 record["fallback_model_calls"] += 1
                 record["fallback_model_seconds"] += elapsed
@@ -469,7 +485,25 @@ class MeasuredUtilityModel:
                 record["ordinary_model_seconds"] += elapsed
 
 
-def install_utility_measurement(agent, call_data: dict, *, outcome: str) -> bool:
+def utility_call_category(call_data: dict) -> str:
+    """Classify a host call before Embedding guidance changes its system text."""
+    purpose = _embedding_memory_purpose(call_data)
+    return {
+        "memory retrieval query preparation": "memory_query",
+        "memory retrieval filtering": "memory_filter",
+        "memory ingestion": "memory_ingestion",
+    }.get(purpose, "other")
+
+
+def _record_model_call(record: dict, category_name: str, elapsed: float) -> None:
+    categories = record["model_call_categories"]
+    category = categories.setdefault(category_name, {"calls": 0, "seconds": 0.0})
+    category["calls"] += 1
+    category["seconds"] += elapsed
+
+
+def install_utility_measurement(agent, call_data: dict, *, outcome: str,
+                                category: str | None = None) -> bool:
     """Measure a verified host Utility call without retaining its content."""
     if (not isinstance(call_data, dict)
             or not isinstance(call_data.get("system"), str)
@@ -478,7 +512,9 @@ def install_utility_measurement(agent, call_data: dict, *, outcome: str) -> bool
     original = call_data.get("model")
     if not callable(getattr(original, "unified_call", None)):
         return False
-    call_data["model"] = MeasuredUtilityModel(original, agent, outcome)
+    if category not in {"memory_query", "memory_filter", "memory_ingestion", "other"}:
+        category = utility_call_category(call_data)
+    call_data["model"] = MeasuredUtilityModel(original, agent, outcome, category)
     return True
 
 
@@ -494,6 +530,7 @@ class FixedUtilityModel:
         self.section = section
         self.confidence = confidence
         self.agent = agent
+        self.category = utility_call_category({"system": system, "message": message})
 
     def __getattr__(self, name):
         return getattr(self.original, name)
@@ -516,7 +553,9 @@ class FixedUtilityModel:
                 result = metrics(self.agent)
                 result["fallbacks"] += 1
                 result["fallback_model_calls"] += 1
-                result["fallback_model_seconds"] += max(0.0, time.monotonic() - start)
+                elapsed = max(0.0, time.monotonic() - start)
+                result["fallback_model_seconds"] += elapsed
+                _record_model_call(result, self.category, elapsed)
         start = time.monotonic()
         try:
             if response_callback:
@@ -606,6 +645,10 @@ async def install_memory_utility_response(agent, call_data: dict) -> UtilityRout
         return INELIGIBLE
     section, policy = settings
     system, message = call_data["system"], call_data["message"]
+    gate = None
+    if kind == "filter":
+        gate = metrics(agent)["memory_filter_gate"]
+        gate["seen"] = gate.get("seen", 0) + 1
     try:
         section_snapshot = deepcopy(section)
         if kind == "query":
@@ -620,8 +663,13 @@ async def install_memory_utility_response(agent, call_data: dict) -> UtilityRout
                               f"Direct search query: {response}")
             expected = {"direct"}
         else:
-            filter_input = _memory_filter_input(message)
+            reason_out = {}
+            filter_input = _memory_filter_input(message, reason_out)
             if filter_input is None:
+                gate["shape_ineligible"] = gate.get("shape_ineligible", 0) + 1
+                reason = reason_out.get("reason", "template")
+                key = "reason_" + reason
+                gate[key] = gate.get(key, 0) + 1
                 return INELIGIBLE
             current_request, history, candidates = filter_input
             choices, responses = _subset_choices(candidates)
@@ -633,29 +681,46 @@ async def install_memory_utility_response(agent, call_data: dict) -> UtilityRout
                                   for index, candidate in enumerate(candidates)))
             expected = set(responses)
         if not _decision_payload_fits(policy, decision_state, choices):
+            if gate is not None:
+                gate["payload_oversize"] = gate.get("payload_oversize", 0) + 1
             return INELIGIBLE
         record = metrics(agent)
         record["decisions"] += 1
+        if gate is not None:
+            gate["decision_attempted"] = gate.get("decision_attempted", 0) + 1
         started = time.monotonic()
         try:
             decision = await client_for(section, policy).choose(decision_state, choices)
         finally:
             record["decision_seconds"] += max(0.0, time.monotonic() - started)
         current = config_for(agent, "utility")
-        if (not current or current[0] != section_snapshot
-                or _memory_call_kind(call_data) != kind
-                or call_data["system"] != system or call_data["message"] != message
-                or not _qualified_choice(decision, current[1], expected)):
+        stale = (not current or current[0] != section_snapshot
+                 or _memory_call_kind(call_data) != kind
+                 or call_data["system"] != system or call_data["message"] != message)
+        qualified = not stale and _qualified_choice(decision, current[1], expected)
+        if not qualified:
             record["fallbacks"] += 1
+            if gate is not None:
+                gate["fallback"] = gate.get("fallback", 0) + 1
+                reason = ("stale" if stale else
+                          "choice" if getattr(decision, "choice", None) not in expected
+                          else "confidence")
+                key = "reason_" + reason
+                gate[key] = gate.get(key, 0) + 1
             return FALLBACK
         if kind == "filter":
             response = responses[decision.choice]
         call_data["model"] = FixedUtilityModel(
             call_data["model"], system, message, response, section_snapshot,
             decision.confidence, agent)
+        if gate is not None:
+            gate["bypass_installed"] = gate.get("bypass_installed", 0) + 1
         return BYPASS
     except Exception:
         metrics(agent)["fallbacks"] += 1
+        if gate is not None:
+            gate["fallback"] = gate.get("fallback", 0) + 1
+            gate["reason_error"] = gate.get("reason_error", 0) + 1
         return FALLBACK
 
 

@@ -28,6 +28,11 @@ If System 1 chooses to await Main despite policy-eligible independent choices,
 the timeline records the number of offered alternatives and the time spent
 waiting. Eligibility does not establish that an alternative was relevant to
 the user's task.
+The per-chat metrics API also exposes a bounded list of completed stage spans
+with times relative to that chat's first measured stage. This permits overlap
+analysis across Main foreground/background, prompt preparation, tool execution,
+and memory recall without storing requests, arguments, or credentials. Native
+parallel child timing is still read from the host's own tool records.
 These mode toggles are global across model presets and agent profiles. Existing
 per-section connections migrate to Decider on read when they agree among
 enabled modes. If enabled modes have different saved connections, choose the
@@ -100,6 +105,16 @@ The read-only per-chat plugin metrics endpoint exposes these counts for
 practical comparisons. Count avoided Utility calls as `bypassed` divided by
 completed Utility calls (`bypassed + ordinary_generations + fallback_model_calls`).
 In-flight calls are excluded from that denominator.
+The endpoint also groups measured original-Utility model calls into
+`memory_query`, `memory_filter`, `memory_ingestion`, and `other`, reporting
+counts and elapsed seconds without request text. These groups identify model
+time, not embedding search or index-write time.
+The `memory_filter_gate` counters also separate an unsupported host shape,
+oversized decision payload, attempted choice, fallback, and installed bypass.
+They include fixed rejection reason counts without candidate text and help
+explain why a filter still used Utility. Verified candidates up to 4000
+characters are considered without truncation; the complete encoded decision
+must fit `max_state_chars`, or the original Utility call runs.
 The endpoint also reports count and elapsed seconds at the host's prompt
 preparation, foreground/background Main, tool execution, and memory recall hook
 boundaries. Delayed recall can continue after its hook span. Ingestion runs in

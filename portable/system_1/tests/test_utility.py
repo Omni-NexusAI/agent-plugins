@@ -142,6 +142,8 @@ class UtilityTests(unittest.TestCase):
             self.agent, self.call_data)))
         self.assertEqual(self.run_call(user_message="Item B"), ("generated", "reasoning"))
         self.assertEqual(len(self.original.calls), 2)
+        self.assertEqual(
+            self.utility.metrics(self.agent)["model_call_categories"]["other"]["calls"], 2)
 
         self.call_data["model"] = self.original
         self.assertTrue(asyncio.run(self.utility.install_fixed_utility_response(
