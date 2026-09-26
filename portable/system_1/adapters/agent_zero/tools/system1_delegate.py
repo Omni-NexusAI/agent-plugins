@@ -13,7 +13,7 @@ class System1Delegate(Tool):
                             break_loop=False)
         from usr.plugins.system_1.helpers.runtime import record_main_delegation
 
-        accepted = record_main_delegation(self.agent, action_ids)
+        accepted = record_main_delegation(self.agent, action_ids, goal=arguments.get("goal"))
         return Response(
             message=("System 1 will choose from the delegated eligible actions next."
                      if accepted else

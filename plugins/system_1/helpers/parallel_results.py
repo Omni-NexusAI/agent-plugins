@@ -12,7 +12,8 @@ _JOB_ID = re.compile(r"[A-Za-z0-9_.-]{1,80}\Z")
 
 
 def parse_parallel_jobs(masked_json: str, batch: list[dict],
-                        job_ids: list[str] | None = None) -> list[dict] | None:
+                        job_ids: list[str] | None = None,
+                        job_indices: list[int] | None = None) -> list[dict] | None:
     """Return ordered, validated job snapshots or ``None`` on any mismatch.
 
     The caller must mask the complete host result before passing it here. A
@@ -22,10 +23,19 @@ def parse_parallel_jobs(masked_json: str, batch: list[dict],
     if (not isinstance(masked_json, str) or len(masked_json) > 2_000_000 or
             not isinstance(batch, list) or not 1 <= len(batch) <= 8 or
             (job_ids is not None and
-             (not isinstance(job_ids, list) or len(job_ids) != len(batch) or
-              len(set(job_ids)) != len(job_ids) or
+             (not isinstance(job_ids, list) or not 1 <= len(job_ids) <= len(batch) or
               any(not isinstance(value, str) or not _JOB_ID.fullmatch(value)
-                  for value in job_ids)))):
+                  for value in job_ids) or len(set(job_ids)) != len(job_ids)))):
+        return None
+    if job_indices is None:
+        if job_ids is not None and len(job_ids) != len(batch):
+            return None
+        job_indices = list(range(len(batch)))
+    elif (job_ids is None or not isinstance(job_indices, list) or
+          len(job_indices) != len(job_ids) or
+          any(not isinstance(index, int) or isinstance(index, bool) or
+              not 0 <= index < len(batch) for index in job_indices) or
+          len(set(job_indices)) != len(job_indices)):
         return None
     try:
         payload = json.loads(masked_json)
@@ -45,7 +55,7 @@ def parse_parallel_jobs(masked_json: str, batch: list[dict],
     # A later native await may return any subset in any order. Match those jobs
     # by their recorded IDs, never by position or by tool name alone.
     expected_by_id = ({job_id: (index, batch[index])
-                       for index, job_id in enumerate(job_ids)}
+                       for job_id, index in zip(job_ids, job_indices)}
                       if job_ids is not None else None)
     parsed = []
     seen_ids = set()

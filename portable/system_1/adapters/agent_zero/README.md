@@ -193,9 +193,21 @@ lists the exact `action_ids` argument shape for Main.
 
 `parallel_safe` is another separate per-action opt-in. Set it to true only when
 the action can run beside other opted-in actions without depending on their
-results or changing shared state. System 1 may then submit a batch through
-Agent Zero's native `parallel` tool before or while Main reasons. Without a
-pending Main subtask, the batch waits for its terminal results. Each child has its own
+results or changing shared state. System 1 may then submit one or more selected
+actions through Agent Zero's native `parallel` tool with `wait: false`, allowing
+foreground Main to reason and use its ordinary coding tools while those jobs
+run. This does not require a background Main advisory call. Async kickoff is
+enabled only for the reviewed, pinned native dispatcher sources; changed or
+overridden host sources conservatively use sequential routing. Set
+`parallel_wait_for_results: true` to collect the batch before Main continues.
+The reviewed worker cloning contract covers the parent context's exact root
+agent and config only; other agents and config/profile overrides stay on the
+normal single-action host path. System 1 checks each child's parent-scoped tool
+permission again at submission. `document_query`, `response`, `parallel`,
+method-style native tool names and subordinate-agent calls are ineligible for
+this direct-tool overlap path.
+This is bounded retrieval overlap: it does not create an autonomous second
+Main loop or initiate new host tools from a plugin background task. Each child has its own
 job ID and recorded outcome; a started job is not a completed result. Dependent
 actions wait for their prerequisites, and the plugin defers a final answer
 until every outstanding native job is collected. The same resolved tool call
@@ -204,6 +216,18 @@ own native parallel children also enter the task's call ledger: pending or
 successful children block a matching System 1 call, and only a verified
 failed child permits retry. A child result carrying an error is not shared as
 successful evidence even when the native job envelope reports success.
+
+A missing or malformed start receipt keeps the submission unresolved and
+blocks finalization even if no job ID was parsed. When the reviewed dispatcher
+registry is available, System 1 may recover exact IDs from its pre-dispatch
+baseline and matching owner, index and canonical call signatures. It does not
+copy registry results as evidence; results still need a normal host collection.
+A registry-proven absent child is recorded as unavailable, with no result and
+no automatic retry. Unknown or ambiguous mappings remain blocked. Main sees
+the native running/ready job list in its prompt and can collect real IDs with
+`parallel` arguments `{"action":"await","job_ids":["actual-id"]}` or cancel
+them with `{"action":"cancel","job_ids":["actual-id"]}`. Awaiting can time out
+while jobs keep running; only recorded terminal results clear the normal guard.
 
 Only configure actions whose exact tool schema and permissions you have
 verified on the installed Agent Zero version. There is no automatic local to

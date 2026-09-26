@@ -12,11 +12,14 @@ SOURCE = (Path(__file__).resolve().parents[1] / "adapters" / "agent_zero" /
 
 
 class CompletionGuardTests(unittest.TestCase):
-    def _load(self, job_ids):
+    def _load(self, job_ids, integrity=None, unresolved=False):
         extension = types.ModuleType("helpers.extension")
         extension.Extension = type("Extension", (), {})
         runtime = types.ModuleType("usr.plugins.system_1.helpers.runtime")
         runtime.pending_parallel_job_ids = lambda agent: list(job_ids)
+        runtime.has_unresolved_parallel_start = lambda agent: unresolved
+        runtime.final_response_integrity = (integrity if callable(integrity)
+                                            else lambda agent, args: integrity)
         modules = patch.dict(sys.modules, {extension.__name__: extension,
                                            runtime.__name__: runtime})
         modules.start()
@@ -42,7 +45,7 @@ class CompletionGuardTests(unittest.TestCase):
 
         self.assertFalse(response.break_loop)
         self.assertEqual(response.message, "System 1 parallel jobs are still awaiting results.")
-        self.assertEqual(item.updates, [{"content": response.message}])
+        self.assertEqual(item.updates, [{"content": response.message, "_system1_deferred": True}])
         self.assertEqual(len(warnings), 1)
         self.assertIn("first-job, second-job", warnings[0])
 
@@ -57,6 +60,64 @@ class CompletionGuardTests(unittest.TestCase):
         self.assertTrue(response.break_loop)
         self.assertEqual(response.message, "completed answer")
         self.assertEqual(warnings, [])
+
+    def test_pending_jobs_do_not_spend_format_retry_budget(self):
+        def unexpected_integrity_check(agent, args):
+            self.fail("Pending jobs must be collected before formatting checks")
+        guard = self._load(["pending-job"], unexpected_integrity_check)
+        guard.agent = types.SimpleNamespace(
+            hist_add_warning=lambda message: None,
+            loop_data=types.SimpleNamespace(params_temporary={}),
+        )
+        response = types.SimpleNamespace(break_loop=True, message="short")
+        guard.execute(response=response, tool_name="response")
+        self.assertFalse(response.break_loop)
+
+
+    def test_repaired_split_answer_is_deferred_and_partial_bubble_replaced(self):
+        guard = self._load([], "retry")
+        warnings = []
+        item = types.SimpleNamespace(updates=[])
+        item.update = lambda **kwargs: item.updates.append(kwargs)
+        guard.agent = types.SimpleNamespace(
+            hist_add_warning=warnings.append,
+            loop_data=types.SimpleNamespace(
+                current_tool=types.SimpleNamespace(args={"text": "short", "sources": "lost"}),
+                params_temporary={"log_item_response": item},
+            ),
+        )
+        response = types.SimpleNamespace(break_loop=True, message="short")
+        guard.execute(response=response, tool_name="response")
+        self.assertFalse(response.break_loop)
+        self.assertEqual(response.message, "The final answer format was invalid; Main is retrying.")
+        self.assertEqual(item.updates, [{"content": response.message, "_system1_deferred": True}])
+        self.assertIn("without repeating successful calls", warnings[0])
+
+    def test_exhausted_repair_returns_honest_error(self):
+        guard = self._load([], "exhausted")
+        guard.agent = types.SimpleNamespace(
+            hist_add_warning=lambda message: None,
+            loop_data=types.SimpleNamespace(params_temporary={}),
+        )
+        response = types.SimpleNamespace(break_loop=True, message="short")
+        guard.execute(response=response, tool_name="response")
+        self.assertTrue(response.break_loop)
+        self.assertNotEqual(response.message, "short")
+
+    def test_unresolved_start_blocks_without_inventing_job_ids(self):
+        def unexpected_integrity_check(agent, args):
+            self.fail("Unresolved host work must not spend the formatting budget")
+        guard = self._load([], unexpected_integrity_check, unresolved=True)
+        warnings = []
+        guard.agent = types.SimpleNamespace(
+            hist_add_warning=warnings.append,
+            loop_data=types.SimpleNamespace(params_temporary={}),
+        )
+        response = types.SimpleNamespace(break_loop=True, message="premature")
+        guard.execute(response=response, tool_name="response")
+        self.assertFalse(response.break_loop)
+        self.assertIn("identities", response.message)
+        self.assertIn("Do not invent IDs", warnings[0])
 
 
 if __name__ == "__main__":

@@ -21,6 +21,13 @@ class System1DelegatePromptTests(unittest.TestCase):
         self.assertIn("still-eligible", text)
         self.assertIn("Do not delegate a completed call", text)
 
+    def test_optional_goal_is_bounded_guidance_without_replay_authority(self):
+        text = PROMPT.read_text(encoding="utf-8")
+        self.assertIn("tool_args.goal", text)
+        self.assertIn("1000 characters", text)
+        self.assertIn("guidance only, not evidence or authorization", text)
+        self.assertIn("Changing the goal does not permit replay", text)
+
 
 if __name__ == "__main__":
     unittest.main()

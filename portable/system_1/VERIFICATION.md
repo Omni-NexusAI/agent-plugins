@@ -4,7 +4,7 @@ This record describes the Agent Zero test instance used for the System 1 expansi
 
 ## Implemented checks
 
-- The portable Python suite and assembled Agent Zero package are checked together. The package must import without the monorepo. The current revision has 163 passing focused tests and 44 assembled files; the updated package has been installed in the existing Agent Zero test container for live checks.
+- The portable Python suite and assembled Agent Zero package are checked together. The package must import without the monorepo. The current revision has 203 passing focused tests and 44 assembled files; the updated package has been installed in the existing Agent Zero test container for live checks.
 - Agent Zero remains the executor for native and MCP tools. System 1 selects bounded actions; later decisions consume host-recorded results. Main writes the final answer when the evidence needs prose.
 - Utility direct memory-query and bounded relevance choices are eligible only for verified host call shapes. Unknown, changed, failed, or uncertain calls use the complete original Utility call. Embedding mode does not replace vectors or the index.
 - The plugin settings page and S1 timeline were inspected in the rendered host UI at desktop and narrow widths. The shared Decider card used adjacent native model field styles and fit the narrow modal; S1 steps expanded beside unchanged Gen and MCP records at both widths. After the final package update, opening the plugin settings moved keyboard focus into the modal, and reverse Tab from the close button wrapped to Cancel instead of reaching the background list. Invalid action JSON displayed a field error, blocked Save, and kept focus in the field; Cancel then reopened with the original valid value and initial focus on the first select. A temporary unreachable Decider endpoint made the rendered status show `unavailable`; after automatic config restoration, Check connection showed the disabled-button `Checking…` state followed by `available`. The temporary viewport override and inspection tabs were removed afterward.
@@ -62,7 +62,7 @@ Prompt-to-final-answer wall time is measured for complete requests. Plugin metri
 
 The memory index remained readable after test chat ingestion: FAISS loaded with 19 vectors of dimension 384, and a reconstructed vector found itself at finite distance. The index changed as the host ingested chats; there is no pre-run vector count, so this is an integrity check rather than proof that every write was append-only.
 
-## Remaining local acceptance
+## Earlier hands-on preparation snapshot
 
 - The final rendered settings and S1 timeline were rechecked after the last package update. The assembled package was imported in the existing test container, the focused suite passed, and the draft pull request was refreshed with the verified source.
 - For hands-on use, the existing test instance has Main and Utility enabled, Embedding disabled, and memory query preparation and post-filter enabled. Three additional read-only test actions were configured locally: native skills search, GitHub pull-request status, and a README read bound to the observed status SHA. These action definitions and the lower read-only test confidence threshold are local test settings, not changes to the pull request or production configuration.
@@ -166,3 +166,176 @@ the saved System 1 and memory settings and preserved the FAISS and pickle
 index hashes. Do not lower the confidence threshold or classify candidates
 independently: the host's relevance contract compares candidates for conflicts,
 duplicates, recency, and completeness.
+
+## Matched long-turn coding comparison and output integrity
+
+A two-repetition, lane-neutral coding/skills/GitHub comparison held the task,
+models, memory configuration, and answer requirements constant. All trials
+restored saved settings and preserved index hashes. The delivered results were:
+
+| Repeat | Main only | Main with System 1 |
+| --- | --- | --- |
+| 1 | 369.74 s host completion; client reached its 300 s deadline; quality passed | 116.01 s; quality passed |
+| 2 | 120.43 s; quality passed | 246.40 s; final-answer quality failed |
+
+The second System 1 answer ended midway through a table and omitted the
+requested README/portable summary. That summary reached Main through the
+recorded README result and appeared in its full provider output. Main emitted
+malformed response JSON; the host's tolerant parser split it into a shortened
+`text` and stray sibling arguments, and the response tool delivered only
+`text`. This is a real delivered-answer failure. Internal generated content
+does not make the trial a quality pass. Repeated tool names were distinct
+operations (skills search versus list, and two different delegation sets), not
+same-argument replay. Neither the timing gap nor the raw internal output is a
+validated speed gain.
+
+These trials did not establish foreground Main coding concurrent with an
+independently progressing System 1 loop: all recorded background Main spans
+were zero, and retrieval/delegation followed coding. That overlap remains a
+separate live acceptance gate.
+
+The plugin completion hook now rejects successfully executed response calls
+with unexpected arguments in the current System 1 monologue. It requests up
+to two formatting retries using existing evidence, replaces the partial chat
+bubble, and returns an explicit failure if retries are exhausted. A valid
+singleton `text` or `message` passes unchanged. Missing/non-string content
+remains the host's native response repair path. Pending parallel collection
+takes precedence over formatting retries. Deferred records have private
+nonterminal metadata; the live-test harness excludes them even when the host
+marks the response log finished. Focused tests cover quoted/multiline text,
+split fields, bounded retries, new-turn isolation, and pending-job precedence.
+The next two-repeat comparison delivered complete answers and verified local
+effects in all four trials (System 1: 130.42 s and 96.74 s; controls: 112.23 s
+and 129.12 s). One malformed control response triggered the formatting guard:
+turn state existed even with Main mode off. The source now additionally requires
+Main System One Mode to be enabled; a regression covers existing state with
+the mode off. Because that control received plugin intervention, this comparison
+is not an untouched baseline and does not establish a speed improvement.
+Saved settings were restored and memory index hashes were unchanged.
+
+The reviewed async path now permits one or more already-selected independent
+native/MCP children to start without waiting while foreground Main continues.
+It requires exact root-agent/config identity, parent tool-policy approval, and
+pinned native dispatcher sources. Unsupported children and unverified hosts
+use ordinary dispatch. Unresolved receipts retain replay reservations and block
+completion; trusted registry recovery supplies identities only. This does not
+create an autonomous second tool loop. The assembled package passes 186 focused
+tests. A controlled live probe recorded one nonblocking native batch containing
+a delayed local read and a real GitHub status lookup. Foreground Main wrote a
+local function and completed its actual assertions approximately 35 seconds
+into the 90.01-second read. Both jobs were collected; the final useful answer
+completed in 234.31 s, with no repeated GitHub calls. Saved settings were restored
+and index hashes matched. Main's subsequent README delegation was declined by
+System 1 (a `main` choice at 63% confidence); Main performed that lookup instead.
+The initial harness counted the delegation attempt too loosely. Its corrected
+gate now separately requires a System 1-selected, host-recorded, System
+1-observed dependent action. Thus foreground overlap passed, while this full
+handback scenario did not. A repeat uses an action description reflecting only
+its actual recorded-SHA dependency, preserving code-before-delegation ordering.
+The artificial read delay must not be counted as a speed benchmark. Rendered
+S1 records and expandable handoff details were inspected at desktop (1280 px)
+and narrow (390 px) widths alongside native Gen, Tool and MCP entries.
+
+A second controlled overlap trial completed in 130.23 s and again passed the
+actual coding-during-retrieval checks, final-answer checks, duplicate checks,
+settings restoration and unchanged-index checks. It again declined the
+dependent README handback, so the corrected combined acceptance gate failed.
+Changing a truthful action description did not establish reliable handback.
+An optional bounded, masked Main subtask goal now accompanies foreground
+delegation. It supplies decision context only, never action authorization,
+result evidence, argument values, or a new replay identity. The third live
+trial supplied that goal and completed in 129.10 s. Actual coding overlapped
+the retrieval, both GitHub calls occurred once, final-answer checks passed,
+and settings and index hashes were restored. System 1 again declined the
+dependent README choice; therefore the complete handback acceptance gate
+still failed. A native chat-label API call also failed; the route was corrected
+and the completed chat label subsequently verified through native save/get.
+
+## Current open gates
+
+- Goal-first delegation passed two foreground overlap tasks: System 1
+  selected and observed the dependent README read after Main verified code and
+  collected both independent jobs. Useful answers completed in 114.16 / 111.18 s;
+  no GitHub call repeated, the native chat label was verified, and saved settings
+  and default memory hashes matched in both trials. The
+  artificial delay is an overlap test, not a latency benchmark.
+- Matched native recall, filtering and full-chat answers now pass the bounded
+  checks below. Timed-out recall cannot count as a speedup; broader workloads
+  and automatic ingestion scheduling retain their separate verification boundary.
+- The new isolated native memory harness checks known facts in a retained
+  task-owned index. Awaiting a native ingestion coroutine is not proof of the
+  host's automatic background scheduler completing its writes.
+- Full-task speed comparisons require complete equivalent answers, unchanged
+  model settings except the tested factor, and no intervention in the baseline.
+- The draft PR must reflect the locally verified source before hands-on
+  readiness is reported. User acceptance and merge authorization remain open.
+
+## Known-fact native memory verification
+
+A process-local configuration overlay used five controlled documents in a new,
+retained native memory subdirectory. The corpus included current facts, an
+outdated plan, an uninformative duplicate, a durable safety rule, and another
+project. Every matched trial retrieved all five candidates and selected exactly
+the current facts plus safety rule, with valid unique indices and no incorrect
+facts. Native persistence and reload checks passed; the default index was never
+initialized by the harness and its file hashes remained unchanged.
+
+| Configuration | Native recall off | Native recall on | Observed mechanism |
+| --- | ---: | ---: | --- |
+| Saved Utility, 4000-character decision limit | 10.40 / 10.25 s | 3.05 / 4.75 s | Direct query bypass; filtering used Utility because the complete payload was oversized. |
+| Alternate saved Utility name, same 4000 limit | 25.57 / 22.22 s | 8.16 / 15.38 s | Query bypass; filtering still used Utility. Models ran separately, so this is not a randomized model comparison. |
+| Saved Utility, process-only 8000 limit | 6.65 / 4.83 s | 0.73 / 0.76 s | Both query and filtering bypassed Utility, preserving exact facts. |
+
+Each row has two trials per mode, with alternating mode order. The last row
+avoided four of four real Utility calls during its two native recall operations;
+separate all-candidate relevance controls also selected the expected indices.
+This is bounded component verification, not prompt-to-final-answer timing or a
+general percentage of Utility work replaced. No saved model or decision-limit
+setting changed during these process-only experiments.
+
+Explicitly awaiting the native fragment-ingestion body persisted the known
+support-contact fact and preserved the initial fixture. The solution-ingestion
+body stored no solution: this history contained a user assertion rather than
+an Agent-executed technical solution. Body return, persisted output, and error
+indicators are separate checks. Automatic background scheduling remains a
+different acceptance boundary; its log heading alone is not a write barrier.
+
+## Full-chat memory comparison after filtering correction
+
+The first eight real chats exposed a routing restriction: filtering reused the
+32-word limit for direct query reuse. All answers were useful, but Utility-on
+avoided no calls. Its first host load also imported six native built-in knowledge
+documents into the task-owned index, preserving the original five fixtures.
+That cold initialization and zero bypasses prevent attributing its timings to
+System 1 acceleration.
+
+Filtering now retains a complete validated current-user envelope independently
+of the short direct-query heuristic. Query writing still falls back for this
+46-word request; unknown envelopes and oversized complete payloads also retain
+the original Utility call. The patched native host repeated eight labeled chats
+against the initialized corpus, with identical models, prompt, answer criteria,
+Embedding off, ingestion off, and a temporary 8000-character decision limit.
+
+| Main mode | Utility mode | Complete task times | Native recall times | Utility calls avoided |
+| --- | --- | --- | --- | --- |
+| Off | Off | 24.30 / 23.64 s | 7.93 / 6.97 s | 0 of 4 |
+| On | Off | 28.44 / 25.25 s | 12.35 / 10.52 s | 0 of 4 |
+| Off | On | 19.27 / 30.06 s | 3.28 / 3.35 s | 2 of 4 (50%) |
+| On | On | 16.39 / 17.86 s | 3.77 / 3.93 s | 2 of 4 (50%) |
+
+These two-trial ranges describe this task only. Utility-on avoided relevance
+generation in all four enabled turns; query generation remained ordinary Utility.
+Each filtering decision added 0.20–0.25 s. Utility-only recall was consistently
+shorter here, but its mean complete-task time was slightly longer than both-off.
+Both-on averaged 17.13 s versus 23.97 s both-off (28.6% shorter in this sample),
+not a general latency or causal attribution claim. This no-action memory task
+does not measure Main delegation performance; the separate overlap trials do.
+
+All eight completed answers passed semantic review for current facts, safe
+containment on health failure, and clear separation of superseded or unrelated
+facts. One answer correctly named rejected historical values, causing the
+simple string-exclusion check to fail; manual review confirmed they were not
+presented as current. Every completion barrier passed. Both initialized fixture
+and default index hashes remained unchanged, and original plugin, memory and
+model settings were verified restored. The saved 4000-character limit was not
+changed; larger filtering payloads can still fall back under that setting.

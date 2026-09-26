@@ -25,7 +25,7 @@ class DelegateToolTests(unittest.TestCase):
         helpers_tool.Tool = Tool
         runtime = types.ModuleType("usr.plugins.system_1.helpers.runtime")
         calls = []
-        runtime.record_main_delegation = lambda agent, ids: calls.append((agent, ids)) or accepted
+        runtime.record_main_delegation = lambda agent, ids, goal=None: calls.append((agent, ids, goal)) or accepted
         modules = patch.dict(sys.modules, {helpers_tool.__name__: helpers_tool,
                                            runtime.__name__: runtime})
         modules.start()
@@ -42,7 +42,7 @@ class DelegateToolTests(unittest.TestCase):
 
         response = __import__("asyncio").run(tool.execute(action_ids=["first", "second"]))
 
-        self.assertEqual(calls, [(tool.agent, ["first", "second"])])
+        self.assertEqual(calls, [(tool.agent, ["first", "second"], None)])
         self.assertFalse(response.break_loop)
         self.assertIn("choose", response.message)
 
@@ -60,9 +60,16 @@ class DelegateToolTests(unittest.TestCase):
 
         response = __import__("asyncio").run(tool.execute(action_ids=["stale"]))
 
-        self.assertEqual(calls, [(tool.agent, ["stale"])])
+        self.assertEqual(calls, [(tool.agent, ["stale"], None)])
         self.assertFalse(response.break_loop)
         self.assertIn("Main should continue", response.message)
+
+    def test_optional_goal_is_validated_by_runtime_without_echoing_it(self):
+        tool, calls = self._load(True)
+        response = __import__("asyncio").run(tool.execute(
+            action_ids=["lookup"], goal="Check the recorded status"))
+        self.assertEqual(calls, [(tool.agent, ["lookup"], "Check the recorded status")])
+        self.assertNotIn("Check the recorded status", response.message)
 
 
 if __name__ == "__main__":

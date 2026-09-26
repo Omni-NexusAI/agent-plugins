@@ -1,5 +1,6 @@
 import asyncio
 import importlib.util
+import json
 from pathlib import Path
 import sys
 import types
@@ -92,6 +93,60 @@ class UtilityMemoryTests(unittest.TestCase):
             user_message=overrides.get("user_message", call_data["message"]),
             response_callback=callback))
 
+    def test_long_verified_request_can_filter_without_broadening_query_eligibility(self):
+        request = " ".join(["current project context"] * 14)
+        envelope = "user: " + json.dumps({"user_message": request})
+        original = OriginalModel()
+        self.choice = types.SimpleNamespace(choice="indices_0_2", confidence=0.99)
+        filter_call = {"system": self.utility.MEMORY_FILTER_SYSTEM,
+                       "message": self.filter_prompt(envelope), "model": original}
+        choices, _ = self.utility._subset_choices(["one", "two", "three"])
+        self.choice.choice = next(key for key, value in choices.items()
+                                 if "[0,2]" in value.replace(" ", ""))
+        self.assertTrue(asyncio.run(self.utility.install_memory_utility_response(
+            self.agent, filter_call)))
+        self.assertEqual(json.loads(self.call(filter_call)[0]), [0, 2])
+        self.assertEqual(original.calls, [])
+        self.assertIn(request, self.states[0][0])
+        self.assertIn("unrelated shopping list", self.states[0][0])
+        calls_before = len(self.states)
+        query_call = {"system": self.utility.MEMORY_QUERY_SYSTEM,
+                      "message": self.query_prompt(envelope, envelope), "model": original}
+        self.assertFalse(asyncio.run(self.utility.install_memory_utility_response(
+            self.agent, query_call)))
+        self.assertIs(query_call["model"], original)
+        self.assertEqual(len(self.states), calls_before)
+
+    def test_filter_unknown_or_augmented_long_envelope_stays_on_original_utility(self):
+        request = " ".join(["current project context"] * 14)
+        envelopes = [
+            {"user_message": request, "unknown": "extra"},
+            {"user_message": request, "attachments": ["file"]},
+            {"user_message": request, "system_message": "instruction"},
+            {"user_message": 4}, {"user_message": " "},
+        ]
+        for value in envelopes:
+            with self.subTest(fields=list(value)):
+                original = OriginalModel()
+                call = {"system": self.utility.MEMORY_FILTER_SYSTEM,
+                        "message": self.filter_prompt("user: " + json.dumps(value)),
+                        "model": original}
+                self.assertFalse(asyncio.run(self.utility.install_memory_utility_response(self.agent, call)))
+                self.assertIs(call["model"], original)
+        self.assertEqual(self.states, [])
+
+    def test_long_verified_filter_request_is_never_truncated_to_fit_payload(self):
+        request = "complete request constraint " * 100
+        envelope = "user: " + json.dumps({"user_message": request})
+        self.config["policy"]["max_state_chars"] = 512
+        original = OriginalModel()
+        call = {"system": self.utility.MEMORY_FILTER_SYSTEM,
+                "message": self.filter_prompt(envelope), "model": original}
+        self.assertFalse(asyncio.run(self.utility.install_memory_utility_response(self.agent, call)))
+        self.assertIs(call["model"], original)
+        self.assertEqual(self.states, [])
+        self.assertEqual(self.utility.metrics(self.agent)["memory_filter_gate"]["payload_oversize"], 1)
+
     def test_query_preparation_bypasses_only_the_verified_host_shape(self):
         original = OriginalModel()
         call_data = {"system": self.utility.MEMORY_QUERY_SYSTEM,
@@ -131,10 +186,94 @@ class UtilityMemoryTests(unittest.TestCase):
         self.assertEqual(self.call(call_data), ("[0,2]", ""))
         self.assertEqual(original.calls, [])
         self.assertIn("Candidate 0: Agent Zero System 1 plan", self.states[0][0])
+        self.assertEqual(self.states[0][0].count(self.utility.MEMORY_FILTER_SYSTEM), 1)
         self.assertIn("Conversation history: Earlier chat", self.states[0][0])
         self.assertIn("keep_0_2", self.states[0][1])
         self.assertEqual(self.utility.metrics(self.agent)["memory_filter_gate"], {
             "seen": 1, "decision_attempted": 1, "bypass_installed": 1})
+
+    def test_five_complete_candidates_fit_with_full_contract_and_preserve_output(self):
+        candidates = [
+            "Current System 1 plan: preserve native tools and verify real overlap.",
+            "Superseded plan: use the earlier retrieval-only probe.",
+            "System 1 evidence: parallel retrieval finished during Main coding.",
+            "Unrelated shopping list: milk and bread.",
+            "Current verification gate: retain terminal results and exact provenance.",
+        ]
+        history = "Earlier plan was superseded. The request concerns the current plan and evidence."
+        request = self.agent_zero_user_envelope("find the current System 1 plan and evidence")
+        message = self.filter_prompt(request, history).replace(
+            "{0: 'Agent Zero System 1 plan', 1: 'unrelated shopping list', "
+            "2: 'System 1 test evidence'}", repr(dict(enumerate(candidates))))
+        original = OriginalModel()
+        call_data = {"system": self.utility.MEMORY_FILTER_SYSTEM,
+                     "message": message, "model": original}
+        self.choice = types.SimpleNamespace(choice="keep_0_2_4", confidence=0.99)
+
+        self.assertTrue(asyncio.run(self.utility.install_memory_utility_response(
+            self.agent, call_data)))
+        state, choices = self.states[0]
+        self.assertEqual(len(choices), 32)
+        self.assertEqual(choices["keep_none"], "[]")
+        self.assertEqual(choices["keep_0_2_4"], "[0,2,4]")
+        self.assertEqual(choices["keep_0_1_2_3_4"], "[0,1,2,3,4]")
+        self.assertEqual(state.count(self.utility.MEMORY_FILTER_SYSTEM), 1)
+        self.assertIn("Select the relevant memory candidate indices only.", state)
+        self.assertIn("Each choice is the exact JSON index list to return.", state)
+        self.assertIn(f"Conversation history: {history}", state)
+        for index, candidate in enumerate(candidates):
+            self.assertIn(f"Candidate {index}: {candidate}", state)
+        self.assertEqual(call_data["message"], message)
+        compact_size = len(json.dumps({"state": state, "choices": choices},
+                                     ensure_ascii=False).encode("utf-8"))
+        legacy_choices = {key: f"Return exactly this JSON index list: {value}"
+                          for key, value in choices.items()}
+        legacy_size = len(json.dumps({"state": state, "choices": legacy_choices},
+                                    ensure_ascii=False).encode("utf-8"))
+        self.assertLessEqual(compact_size, self.config["policy"]["max_state_chars"])
+        self.assertGreater(legacy_size, self.config["policy"]["max_state_chars"])
+        self.assertEqual(legacy_size - compact_size, 32 * 37)
+        chunks = []
+
+        async def callback(chunk, total):
+            chunks.append((chunk, total))
+
+        self.assertEqual(self.call(call_data, callback), ("[0,2,4]", ""))
+        self.assertEqual(chunks, [("[0,2,4]", "[0,2,4]")])
+        self.assertEqual(original.calls, [])
+
+    def test_compact_choices_still_reject_complete_oversized_candidate_state(self):
+        candidates = {index: f"Candidate {index} complete detail: " + "evidence " * 60
+                      for index in range(6)}
+        message = self.filter_prompt(self.agent_zero_user_envelope()).replace(
+            "{0: 'Agent Zero System 1 plan', 1: 'unrelated shopping list', "
+            "2: 'System 1 test evidence'}", repr(candidates))
+        original = OriginalModel()
+        call_data = {"system": self.utility.MEMORY_FILTER_SYSTEM,
+                     "message": message, "model": original}
+        self.choice = types.SimpleNamespace(choice="keep_0", confidence=0.99)
+        self.assertFalse(asyncio.run(self.utility.install_memory_utility_response(
+            self.agent, call_data)))
+        self.assertIs(call_data["model"], original)
+        self.assertEqual(call_data["message"], message)
+        self.assertEqual(self.states, [])
+        self.assertEqual(self.utility.metrics(self.agent)["memory_filter_gate"],
+                         {"seen": 1, "payload_oversize": 1})
+        self.assertEqual(self.call(call_data), ("generated", "reasoning"))
+
+    def test_compact_subset_ids_preserve_each_exact_response_mapping(self):
+        choices, responses = self.utility._subset_choices(["candidate"] * 6)
+        self.assertEqual(len(choices), 64)
+        selected_sets = set()
+        for choice_id, response in responses.items():
+            selected = json.loads(response)
+            expected_id = "keep_" + ("_".join(map(str, selected)) if selected else "none")
+            self.assertEqual(choice_id, expected_id)
+            self.assertEqual(choices[choice_id], response)
+            self.assertEqual(selected, sorted(set(selected)))
+            self.assertTrue(all(0 <= index < 6 for index in selected))
+            selected_sets.add(tuple(selected))
+        self.assertEqual(len(selected_sets), 64)
 
     def test_long_candidate_uses_decider_only_when_full_payload_fits(self):
         candidate = "relevant detail " * 70

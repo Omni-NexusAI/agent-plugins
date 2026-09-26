@@ -94,6 +94,13 @@
   native parallel children also enter that ledger by validated job ID: a
   pending child blocks replay, terminal success stays blocked, and a verified
   failed child may be retried. Unparsed or mismatched job results fail closed.
+  A reviewed native async dispatcher may start one or more opted-in children
+  before foreground Main resumes normal reasoning and coding. Keep the host
+  dispatcher contract pinned and fall back sequentially when it changes.
+  Missing start receipts retain unresolved-inflight state and block finalization
+  without invented job IDs. Trusted registry recovery maps IDs only; registry
+  output is never backend evidence. This supports bounded retrieval overlap,
+  not concurrent plugin calls into the parent agent's mutable tool loop.
   A native child whose recorded result is an error is failed evidence even if
   the native parallel envelope labels the job successful.
 - On Agent Zero, the first model turn is loop iteration zero. A later

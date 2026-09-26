@@ -135,6 +135,24 @@ class ParallelResultContractTests(unittest.TestCase):
         self.assertEqual([job["result"] for job in jobs], ["", ""])
         self.assertEqual([job["error"] for job in jobs], ["worker timed out", "interrupted"])
 
+    def test_recovered_subset_ids_keep_the_original_child_index(self):
+        aggregate = json.dumps({"status": "success", "jobs": [
+            {"job_id": "memory-project", "tool_name": "memory_load", "state": "success",
+             "result": "project context"}]})
+        jobs = PARALLEL.parse_parallel_jobs(
+            aggregate, self.batch, ["memory-project"], job_indices=[1])
+        self.assertEqual([(job["job_id"], job["batch_index"]) for job in jobs], [("memory-project", 1)])
+        self.assertIsNone(PARALLEL.parse_parallel_jobs(aggregate, self.batch, ["memory-project"]))
+
+    def test_recovered_original_indices_must_be_bounded_unique_integers(self):
+        aggregate = json.dumps({"status": "success", "jobs": [
+            {"job_id": "memory-project", "tool_name": "memory_load", "state": "success",
+             "result": "project context"}]})
+        for invalid in ([True], [-1], [2], [{}], [1, 1]):
+            with self.subTest(indices=invalid):
+                self.assertIsNone(PARALLEL.parse_parallel_jobs(
+                    aggregate, self.batch, ["memory-project"], job_indices=invalid))
+
 
 if __name__ == "__main__":
     unittest.main()

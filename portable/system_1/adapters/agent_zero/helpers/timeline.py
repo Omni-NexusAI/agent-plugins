@@ -20,6 +20,8 @@ _EVENTS = {
     "parallel_started": ("Parallel actions started", "Awaiting host results"),
     "parallel_observed": ("Parallel results observed", "Results available for decisions"),
     "parallel_failed": ("Parallel action failed", "Main will assess the failure"),
+    "parallel_receipt_unresolved": (
+        "Parallel start unresolved", "Verify host job identities before completion"),
     "tool_failed": ("Host action failed", "Main will assess the failure"),
     "stale_advice": ("Stale Main advice discarded", "Task state changed"),
     "final_handoff": ("Final answer handed to Main", "Main will use recorded evidence"),

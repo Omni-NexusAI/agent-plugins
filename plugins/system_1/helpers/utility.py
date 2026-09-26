@@ -359,6 +359,21 @@ def _direct_host_request(request: str) -> str | None:
     return _direct_query(request)
 
 
+def _validated_filter_request(request: str) -> str | None:
+    """Keep the full verified current-user request for candidate comparison.
+
+    Filtering evaluates an existing bounded candidate set, rather than writing
+    a search query. The short direct-query heuristic must not discard valid
+    longer current requests. Unknown envelopes and plain-text shapes retain
+    their existing conservative fallback.
+    """
+    request = request.strip()
+    if request.startswith("user:"):
+        current = _current_user_envelope(request, "user")
+        return current if current is not None and current.strip() else None
+    return _direct_query(request)
+
+
 def _known_bootstrap_then_current(history: str, current: str) -> bool:
     """Allow only the pinned host greeting record before the first user entry."""
     if len(history) <= _INITIAL_BOOTSTRAP_RECORD_CHARS:
@@ -443,7 +458,7 @@ def _memory_filter_input(message: str, reason_out: dict | None = None
         return reject("candidate_format")
     if any(len(value) > _MAX_MEMORY_CANDIDATE_CHARS for value in candidates):
         return reject("candidate_length")
-    current_request = _direct_host_request(request)
+    current_request = _validated_filter_request(request)
     return (current_request, history, candidates) if current_request else reject("request_shape")
 
 
@@ -454,7 +469,7 @@ def _subset_choices(candidates: list[str]) -> tuple[dict[str, str], dict[str, st
         for selected in itertools.combinations(range(len(candidates)), size):
             response = json.dumps(list(selected), separators=(",", ":"))
             choice_id = "keep_" + ("_".join(map(str, selected)) if selected else "none")
-            choices[choice_id] = f"Return exactly this JSON index list: {response}"
+            choices[choice_id] = response
             responses[choice_id] = response
     return choices, responses
 
@@ -674,7 +689,9 @@ async def install_memory_utility_response(agent, call_data: dict) -> UtilityRout
             current_request, history, candidates = filter_input
             choices, responses = _subset_choices(candidates)
             response = None
-            decision_state = ("Select the relevant memory candidate indices only.\n"
+            decision_state = (f"{MEMORY_FILTER_SYSTEM}\n\n"
+                              "Select the relevant memory candidate indices only.\n"
+                              "Each choice is the exact JSON index list to return.\n"
                               f"Current request: {current_request}\n"
                               f"Conversation history: {history}\n" + "\n".join(
                                   f"Candidate {index}: {candidate}"

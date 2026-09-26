@@ -3,6 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import tempfile
 import types
 import unittest
 from unittest.mock import patch
@@ -22,6 +23,8 @@ class RoutingTests(unittest.TestCase):
                        "policy": {"action_precedence": "tool_first", "actions": {}}}
         helpers = types.ModuleType("helpers")
         helpers.plugins = types.SimpleNamespace(get_plugin_config=lambda _name, _agent: self.config)
+        tool_policy = types.ModuleType("helpers.tool_policy")
+        tool_policy.ensure_tool_allowed = lambda *args: types.SimpleNamespace(allowed=True)
         core = types.ModuleType("usr.plugins.system_1.helpers.system_1_core")
         core.DecisionClient = object
         core.DecisionError = RuntimeError
@@ -42,6 +45,7 @@ class RoutingTests(unittest.TestCase):
         auxiliary = types.ModuleType("usr.plugins.auxiliary_model_roles.helpers.runtime")
         auxiliary.available_roles = lambda agent: {"tool": {"enabled": True}}
         self.modules = patch.dict(sys.modules, {"helpers": helpers, core.__name__: core,
+                                                 tool_policy.__name__: tool_policy,
                                                  decision.__name__: decision, timeline.__name__: timeline,
                                                  tool_availability.__name__: tool_availability,
                                                  parallel_results.__name__: parallel_results,
@@ -53,6 +57,33 @@ class RoutingTests(unittest.TestCase):
 
     def tearDown(self):
         self.modules.stop()
+
+    def test_final_response_preserves_valid_quoted_multiline_text(self):
+        agent = Agent()
+        self.runtime._turn_state(agent, create=True)
+        args = {"text": 'README says "portable".\nSecond line.'}
+        self.assertIsNone(self.runtime.final_response_integrity(agent, args))
+        self.assertEqual(args["text"], 'README says "portable".\nSecond line.')
+        self.assertIsNone(self.runtime.final_response_integrity(agent, {"message": "Complete"}))
+
+    def test_final_response_repair_is_bounded_and_scoped_to_monologue(self):
+        agent = Agent()
+        self.runtime._turn_state(agent, create=True)
+        split = {"text": "table cut off", "sources": "README evidence"}
+        self.assertEqual(self.runtime.final_response_integrity(agent, split), "retry")
+        self.assertEqual(self.runtime.final_response_integrity(agent, split), "retry")
+        self.assertEqual(self.runtime.final_response_integrity(agent, split), "exhausted")
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        self.assertIsNone(self.runtime.final_response_integrity(agent, split))
+        self.runtime._turn_state(agent, create=True)
+        self.assertEqual(self.runtime.final_response_integrity(agent, {"text": 12}), "retry")
+
+    def test_final_response_guard_leaves_ordinary_main_turn_untouched(self):
+        agent = Agent()
+        self.assertIsNone(self.runtime.final_response_integrity(agent, {"text": "short", "first": "lost"}))
+        self.runtime._turn_state(agent, create=True)
+        self.config["main"]["enabled"] = False
+        self.assertIsNone(self.runtime.final_response_integrity(agent, {"text": "short", "first": "lost"}))
 
     def test_main_correction_is_never_partially_forwarded(self):
         state = {"main_guidance": "", "actions_submitted": 0,
@@ -1016,6 +1047,138 @@ class RoutingTests(unittest.TestCase):
         self.assertIn("pr_status", calls[0][0])
         self.assertTrue(calls[0][0].startswith("Main delegation:"))
 
+    def _goal_delegation_fixture(self):
+        self.config["policy"]["actions"] = {
+            "lookup": {"tool_name": "memory_load", "tool_args": {"query": "fixed"}}}
+        agent = Agent()
+        agent.context = object()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        state = self.runtime._turn_state(agent, create=True)
+        state.update({"complete": True, "owner": "main",
+                      "request_fingerprint": self.runtime._request_fingerprint("Inspect this page")})
+        return agent, state
+
+    def _goal_masker(self, mask):
+        module = types.ModuleType("helpers.secrets")
+        module.get_secrets_manager = lambda context: types.SimpleNamespace(mask_values=mask)
+        return patch.dict(sys.modules, {"helpers.secrets": module})
+
+    def test_delegation_goal_is_masked_before_retention_and_decider_context(self):
+        agent, state = self._goal_delegation_fixture()
+        with self._goal_masker(lambda text: text.replace("secret-token", "[REDACTED]")):
+            self.assertTrue(self.runtime.record_main_delegation(
+                agent, ["lookup"], goal="Verify secret-token status"))
+        self.assertEqual(state["main_delegation_goal"], "Verify [REDACTED] status")
+        agent.loop_data.iteration = 1
+        contexts = []
+
+        async def decide(context, choices):
+            contexts.append(context)
+            return types.SimpleNamespace(choice="lookup", confidence=0.99, backend="jev")
+
+        self.runtime.client_for = lambda *args: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        action = asyncio.run(self.runtime.main_decision(agent))
+        self.assertEqual(json.loads(action)["tool_args"], {"query": "fixed"})
+        self.assertIn("Original request: Inspect this page", contexts[0])
+        self.assertIn("guidance only, not evidence or authorization", contexts[0])
+        self.assertIn("Verify [REDACTED] status", contexts[0])
+        self.assertNotIn("secret-token", repr(state))
+        self.assertNotIn("Verify", repr(self.timeline_events))
+
+    def test_invalid_delegation_goals_fail_without_retention_or_attempt_commit(self):
+        agent, state = self._goal_delegation_fixture()
+        masked = []
+        with self._goal_masker(lambda text: masked.append(text) or text):
+            for goal in ({"scope": "x"}, 4, "", " ", "x" * 1001, "line\nline", "\x00", "\ud800"):
+                with self.subTest(goal_type=type(goal).__name__, length=len(goal) if isinstance(goal, str) else 0):
+                    self.assertFalse(self.runtime.record_main_delegation(agent, ["lookup"], goal=goal))
+        self.assertEqual(masked, [])
+        self.assertEqual(state["main_delegation_attempts"], {})
+        self.assertTrue(state["complete"])
+        self.assertNotIn("main_delegation_goal", state)
+
+    def test_delegation_goal_requires_working_host_masking_but_ids_only_remains_valid(self):
+        agent, state = self._goal_delegation_fixture()
+        with patch.dict(sys.modules, {"helpers.secrets": None}):
+            self.assertFalse(self.runtime.record_main_delegation(agent, ["lookup"], goal="bounded"))
+            self.assertTrue(self.runtime.record_main_delegation(agent, ["lookup"]))
+        self.assertEqual(state["main_delegation_goal"], "")
+
+    def test_masking_failure_or_malformed_masked_goal_rejects_delegation(self):
+        agent, state = self._goal_delegation_fixture()
+        def broken(_text):
+            raise RuntimeError("masker unavailable")
+        for mask in (broken, lambda text: None, lambda text: "x" * 1001, lambda text: "\n"):
+            with self._goal_masker(mask):
+                self.assertFalse(self.runtime.record_main_delegation(agent, ["lookup"], goal="bounded"))
+        self.assertEqual(state["main_delegation_attempts"], {})
+
+    def test_changing_delegation_goal_cannot_evade_same_evidence_replay(self):
+        agent, state = self._goal_delegation_fixture()
+        with self._goal_masker(lambda text: text):
+            self.assertTrue(self.runtime.record_main_delegation(agent, ["lookup"], goal="first goal"))
+            state.update({"complete": True, "owner": "main", "delegate_pending": False})
+            self.assertFalse(self.runtime.record_main_delegation(agent, ["lookup"], goal="different goal"))
+        self.assertEqual(state["main_delegation_goal"], "first goal")
+
+    def test_goal_does_not_authorize_changed_task_during_decision(self):
+        agent, state = self._goal_delegation_fixture()
+        with self._goal_masker(lambda text: text):
+            self.assertTrue(self.runtime.record_main_delegation(agent, ["lookup"], goal="bounded goal"))
+        agent.loop_data.iteration = 1
+        async def decide(context, choices):
+            agent.last_user_message = types.SimpleNamespace(output_text=lambda: "Changed task")
+            return types.SimpleNamespace(choice="lookup", confidence=0.99, backend="jev")
+        self.runtime.client_for = lambda *args: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertEqual(state["actions_submitted"], 0)
+
+    def test_delegation_scope_is_not_truncated_to_fit_decision_context(self):
+        with self.assertRaises(RuntimeError):
+            self.runtime._decision_state("request", [], {}, 256, "",
+                delegated_ids=["lookup"], delegation_goal="x" * 1000)
+
+    def test_current_delegation_goal_precedes_full_broader_task_and_host_evidence(self):
+        original = "Write and verify code, then inspect README. " + "constraint " * 90
+        action = {"tool_name": "memory_load", "tool_args": {"query": "fixed"},
+                  "share_result_with_backend": True}
+        observation = {"action_id": "lookup", "action_definition": action,
+                       "tool_name": "memory_load", "result": "complete recorded evidence"}
+        context = self.runtime._decision_state(original, [observation],
+            {"actions": {"lookup": action}}, 4000, "keep the recorded constraint",
+            delegated_ids=["lookup"], delegation_goal='Read the "recorded" README')
+        labels = ["Main delegation:", "CURRENT delegated decision:", "Delegated IDs:",
+                  "Main-provided goal", "Broader task context and constraints",
+                  "Original request:", "Prior choice:", "Observed result:", "Main correction:"]
+        self.assertEqual([context.index(label) for label in labels],
+                         sorted(context.index(label) for label in labels))
+        self.assertIn(original, context)
+        self.assertIn(json.dumps('Read the "recorded" README'), context)
+        self.assertIn('Delegated IDs: ["lookup"]', context)
+        self.assertIn("complete recorded evidence", context)
+        self.assertIn("keep the recorded constraint", context)
+        self.assertIn("select main to decline if none fits", context)
+
+    def test_current_goal_does_not_force_execution_of_irrelevant_delegated_action(self):
+        agent, state = self._goal_delegation_fixture()
+        with self._goal_masker(lambda text: text):
+            self.assertTrue(self.runtime.record_main_delegation(
+                agent, ["lookup"], goal="Decide whether this lookup helps the remaining task"))
+        agent.loop_data.iteration = 1
+        offered = []
+        async def decide(context, choices):
+            offered.append(set(choices))
+            return types.SimpleNamespace(choice="main", confidence=0.99, backend="jev")
+        self.runtime.client_for = lambda *args: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertEqual(offered, [{"lookup", "main"}])
+        self.assertEqual(state["actions_submitted"], 0)
+        self.assertIsNone(state["pending"])
+        self.assertEqual(state["owner"], "main")
+
     def test_main_can_decline_a_delegated_choice_without_a_host_dispatch(self):
         selected = {"tool_name": "memory_load", "tool_args": {"query": "delegated"}}
         self.config["policy"]["actions"] = {"selected": selected}
@@ -1331,7 +1494,275 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(state["used_action_ids"], {"first"})
         self.assertIsNone(state["pending"])
 
+    def _start_async_single(self, *, registry=None):
+        self.runtime.native_async_parallel_supported = lambda agent: True
+        action = {"tool_name": "memory_load", "tool_args": {"query": "alpha"},
+                  "independent_while_main": True, "parallel_safe": True,
+                  "share_result_with_backend": True, "allow_result_bindings": True}
+        self.config["policy"]["actions"] = {"alpha": action}
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        if registry is not None:
+            agent.context = types.SimpleNamespace(get_data=lambda key: registry)
+        state = self.runtime._turn_state(agent, create=True)
+        async def decide(*args):
+            raise AssertionError("One selected child needs no extra batch decision")
+        call = asyncio.run(self.runtime._maybe_batch_independent(
+            agent, state, types.SimpleNamespace(choose=decide), "Inspect this page",
+            {"alpha": action}, "alpha", self.config["policy"], "Inspect this page", 0.85))
+        return agent, state, action, json.loads(call)
+
+    def test_selected_single_retrieval_starts_async_without_background_main_advice(self):
+        self.runtime.native_async_parallel_supported = lambda agent: True
+        self.config["policy"]["action_precedence"] = "main_first"
+        action = {"tool_name": "github_mcp_server.get_pull_request_status",
+                  "tool_args": {"pull_number": 11},
+                  "independent_while_main": True, "parallel_safe": True}
+        self.config["policy"]["actions"] = {"status": action}
+        choices_seen = []
+        async def decide(_state, choices):
+            choices_seen.append(set(choices))
+            return types.SimpleNamespace(choice="status", confidence=0.99, backend="jev")
+        self.runtime.client_for = lambda *args: types.SimpleNamespace(choose=decide)
+        self.runtime.selected_action = lambda result, actions, threshold: actions.get(result.choice)
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        async def no_background(**kwargs):
+            raise AssertionError("Foreground retrieval kickoff must not need advisory Main")
+        agent.call_chat_model = no_background
+
+        call = json.loads(asyncio.run(self.runtime.main_decision(agent)))
+        state = self.runtime._turn_state(agent)
+        self.assertEqual(call, {"tool_name": "parallel", "tool_args": {
+            "tool_calls": [{"tool_name": action["tool_name"], "tool_args": action["tool_args"]}],
+            "wait": False}})
+        self.assertFalse(state["main_requested"])
+        self.assertIsNone(state["main_task"])
+        self.assertEqual(len(choices_seen), 1)
+        self.runtime.record_host_result(agent, "parallel", json.dumps({"status": "started", "jobs": [
+            {"job_id": "status-job", "tool_name": action["tool_name"], "state": "running"}]}))
+        agent.loop_data.iteration = 1
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertTrue(self.runtime.record_main_host_action(
+            agent, "code_execution_tool", {"code": "write_and_test()"}))
+        self.assertEqual(self.runtime.pending_parallel_job_ids(agent), ["status-job"])
+        self.assertEqual(state["observations"], [])
+
+    def test_single_async_kickoff_needs_verified_host_and_both_safety_flags(self):
+        for overrides, supported in [({}, False), ({"parallel_safe": False}, True),
+                                     ({"independent_while_main": False}, True)]:
+            with self.subTest(overrides=overrides, supported=supported):
+                self.runtime.native_async_parallel_supported = lambda agent: supported
+                action = {"tool_name": "memory_load", "tool_args": {"query": "alpha"},
+                          "independent_while_main": True, "parallel_safe": True, **overrides}
+                self.config["policy"]["actions"] = {"alpha": action}
+                agent = Agent()
+                state = self.runtime._turn_state(agent, create=True)
+                call = asyncio.run(self.runtime._maybe_batch_independent(
+                    agent, state, object(), "Inspect this page", {"alpha": action},
+                    "alpha", self.config["policy"], "Inspect this page", 0.85))
+                self.assertIsNone(call)
+                self.assertIsNone(state["pending"])
+
+    def test_unverified_host_with_multiple_candidates_uses_no_parallel_wrapper(self):
+        self.runtime.native_async_parallel_supported = lambda agent: False
+        actions = {key: {"tool_name": "memory_load", "tool_args": {"query": key},
+                         "independent_while_main": True, "parallel_safe": True}
+                   for key in ("alpha", "bravo")}
+        self.config["policy"]["actions"] = actions
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        call = asyncio.run(self.runtime._maybe_batch_independent(
+            agent, state, object(), "Inspect this page", actions, "alpha",
+            self.config["policy"], "Inspect this page", 0.85))
+        self.assertIsNone(call)
+        self.assertIsNone(state["pending"])
+        self.assertEqual(state["actions_submitted"], 0)
+
+    def test_dispatcher_incompatible_native_tools_remain_on_normal_single_path(self):
+        self.runtime.native_async_parallel_supported = lambda agent: True
+        for name in ("document_query", "response", "parallel", "memory_load:search", "call_subordinate"):
+            with self.subTest(tool=name):
+                action = {"tool_name": name, "tool_args": {"query": "alpha"},
+                          "independent_while_main": True, "parallel_safe": True}
+                self.config["policy"]["actions"] = {"alpha": action}
+                agent = Agent()
+                state = self.runtime._turn_state(agent, create=True)
+                call = asyncio.run(self.runtime._maybe_batch_independent(
+                    agent, state, object(), "Inspect this page", {"alpha": action},
+                    "alpha", self.config["policy"], "Inspect this page", 0.85))
+                self.assertIsNone(call)
+                self.assertIsNone(state["pending"])
+
+    def test_non_root_or_overridden_parent_config_cannot_use_verified_async_contract(self):
+        agent = Agent()
+        agent.config = object()
+        for root, config in ((object(), agent.config), (agent, object())):
+            with self.subTest(root_matches=root is agent, config_matches=config is agent.config):
+                agent.context = types.SimpleNamespace(agent0=root, config=config)
+                with patch.object(self.runtime.importlib.util, "find_spec",
+                                  side_effect=AssertionError("No source lookup for incompatible parent")):
+                    self.assertFalse(self.runtime.native_async_parallel_supported(agent))
+
+    def test_parent_permission_revocation_at_submission_prevents_entire_batch(self):
+        self.runtime.native_async_parallel_supported = lambda agent: True
+        actions = {key: {"tool_name": key + "_tool", "tool_args": {"query": key},
+                         "independent_while_main": True, "parallel_safe": True}
+                   for key in ("alpha", "bravo")}
+        self.config["policy"]["actions"] = actions
+        agent = Agent()
+        state = self.runtime._turn_state(agent, create=True)
+        denied = []
+        policy = sys.modules["helpers.tool_policy"]
+        def permission(_agent, name):
+            self.assertIs(_agent, agent)
+            if name in denied:
+                raise RuntimeError("parent profile blocks this child")
+            return types.SimpleNamespace(allowed=True)
+        async def decide(*args):
+            denied.append("bravo_tool")
+            return types.SimpleNamespace(choice="bravo", confidence=0.99, backend="jev")
+        policy.ensure_tool_allowed = permission
+        call = asyncio.run(self.runtime._maybe_batch_independent(
+            agent, state, types.SimpleNamespace(choose=decide), "Inspect this page", actions,
+            "alpha", self.config["policy"], "Inspect this page", 0.85))
+        self.assertIsNone(call)
+        self.assertIsNone(state["pending"])
+        self.assertEqual(state["actions_submitted"], 0)
+
+    def test_missing_parent_permission_checker_disables_parallel_wrapper(self):
+        agent = Agent()
+        with patch.dict(sys.modules, {"helpers.tool_policy": None}):
+            self.assertFalse(self.runtime._parallel_child_allowed(agent, "memory_load"))
+
+    def test_missing_or_malformed_async_start_blocks_finalization_and_replay(self):
+        for receipt in (None, "not a native receipt"):
+            with self.subTest(receipt=receipt):
+                agent, state, action, call = self._start_async_single()
+                if receipt is not None:
+                    self.assertFalse(self.runtime.record_host_result(agent, "parallel", receipt))
+                self.assertTrue(self.runtime.has_unresolved_parallel_start(agent))
+                self.assertEqual(self.runtime.pending_parallel_job_ids(agent), [])
+                self.assertIsNotNone(state["pending"])
+                self.assertEqual(state["observations"], [])
+                self.assertEqual(self.runtime._eligible_actions(
+                    agent, self.config["policy"], state, "Inspect this page"), {})
+                state["complete"] = True
+                self.assertIn("job mapping is unresolved", self.runtime.main_handoff_note(agent))
+                unrelated = json.dumps({"status": "success", "jobs": [
+                    {"job_id": "unrelated", "tool_name": "memory_load", "state": "success",
+                     "result": "not our evidence"}]})
+                self.assertFalse(self.runtime.record_host_result(agent, "parallel", unrelated))
+                self.assertTrue(self.runtime.has_unresolved_parallel_start(agent))
+
+    def test_unknown_start_recovers_exact_native_ids_but_never_registry_results(self):
+        registry = {}
+        agent, state, action, call = self._start_async_single(registry=registry)
+        registry["actual-job"] = types.SimpleNamespace(
+            parent_agent=agent, index=0, tool_name="memory_load", tool_args=action["tool_args"],
+            state="success", result="UNTRUSTED_REGISTRY_OUTPUT")
+        self.assertFalse(self.runtime.record_host_result(agent, "parallel", "malformed"))
+        self.assertFalse(self.runtime.has_unresolved_parallel_start(agent))
+        self.assertEqual(self.runtime.pending_parallel_job_ids(agent), ["actual-job"])
+        self.assertEqual(state["observations"], [])
+        self.assertNotIn("UNTRUSTED_REGISTRY_OUTPUT", self.runtime.main_handoff_note(agent))
+        self.assertTrue(self.runtime.record_host_result(agent, "parallel", json.dumps({
+            "status": "success", "jobs": [{"job_id": "actual-job", "tool_name": "memory_load",
+                "state": "success", "result": "host-recorded masked result"}]})))
+        self.assertEqual(state["observations"][0]["result"], "host-recorded masked result")
+        self.assertIsNone(state["pending"])
+
+    def test_unknown_start_registry_ambiguity_or_changed_host_remains_blocked(self):
+        for ambiguous in (True, False):
+            with self.subTest(ambiguous=ambiguous):
+                registry = {}
+                agent, state, action, call = self._start_async_single(registry=registry)
+                for job_id in ("one", "two") if ambiguous else ("one",):
+                    registry[job_id] = types.SimpleNamespace(
+                        parent_agent=agent, index=0, tool_name="memory_load", tool_args=action["tool_args"])
+                self.runtime.record_host_result(agent, "parallel", "malformed")
+                if not ambiguous:
+                    self.runtime.native_async_parallel_supported = lambda agent: False
+                self.assertTrue(self.runtime.has_unresolved_parallel_start(agent))
+                self.assertEqual(self.runtime.pending_parallel_job_ids(agent), [])
+
+    def test_unknown_start_lost_or_corrupt_registry_never_proves_absence(self):
+        for value in (None, "invalid registry"):
+            with self.subTest(value=value):
+                agent, state, action, call = self._start_async_single(registry={})
+                self.runtime.record_host_result(agent, "parallel", "malformed")
+                agent.context = types.SimpleNamespace(get_data=lambda key: value)
+                self.assertTrue(self.runtime.has_unresolved_parallel_start(agent))
+                self.assertIsNotNone(state["pending"])
+                self.assertEqual(state["observations"], [])
+
+    def test_verified_empty_registry_resolves_never_started_children_as_unavailable(self):
+        agent, state, action, call = self._start_async_single(registry={})
+        self.runtime.record_host_result(agent, "parallel", "malformed")
+        self.assertFalse(self.runtime.has_unresolved_parallel_start(agent))
+        self.assertEqual(self.runtime.pending_parallel_job_ids(agent), [])
+        self.assertIsNone(state["pending"])
+        observed = state["observations"][0]
+        self.assertFalse(observed["succeeded"])
+        self.assertFalse(observed["retryable"])
+        self.assertEqual(observed["result"], "")
+        self.assertEqual(observed["binding_result"], "")
+        self.assertTrue(state["parallel_failed"])
+
+    def test_partial_start_recovery_preserves_original_child_index_for_collection(self):
+        self.runtime.native_async_parallel_supported = lambda agent: True
+        actions = {key: {"tool_name": "memory_load", "tool_args": {"query": key},
+                         "independent_while_main": True, "parallel_safe": True,
+                         "share_result_with_backend": True, "allow_result_bindings": True}
+                   for key in ("alpha", "bravo")}
+        self.config["policy"]["actions"] = actions
+        registry = {}
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        agent.context = types.SimpleNamespace(get_data=lambda key: registry)
+        state = self.runtime._turn_state(agent, create=True)
+        async def decide(*args):
+            return types.SimpleNamespace(choice="bravo", confidence=0.99, backend="jev")
+        asyncio.run(self.runtime._maybe_batch_independent(
+            agent, state, types.SimpleNamespace(choose=decide), "Inspect this page",
+            actions, "alpha", self.config["policy"], "Inspect this page", 0.85))
+        registry["bravo-job"] = types.SimpleNamespace(parent_agent=agent, index=1,
+            tool_name="memory_load", tool_args=actions["bravo"]["tool_args"])
+        self.runtime.record_host_result(agent, "parallel", "malformed")
+        self.assertFalse(self.runtime.has_unresolved_parallel_start(agent))
+        self.assertEqual(state["pending"]["job_indices"], [1])
+        self.assertEqual([child["action_id"] for child in state["pending"]["batch"]], ["alpha", "bravo"])
+        self.assertEqual([item["action_id"] for item in state["observations"]], ["alpha"])
+        self.assertFalse(state["observations"][0]["succeeded"])
+        self.assertTrue(self.runtime.record_host_result(agent, "parallel", json.dumps({
+            "status": "success", "jobs": [{"job_id": "bravo-job", "tool_name": "memory_load",
+                "state": "success", "result": "bravo host evidence"}]})))
+        self.assertEqual([item["action_id"] for item in state["observations"]], ["alpha", "bravo"])
+        self.assertEqual(state["observations"][1]["binding_result"], "bravo host evidence")
+        self.assertIsNone(state["pending"])
+
+    def test_async_contract_gate_checks_sources_without_importing_native_tools(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tool, scheduler = root / "parallel.py", root / "parallel_tools.py"
+            tool.write_text("verified tool\n", encoding="utf-8")
+            scheduler.write_text("verified scheduler\n", encoding="utf-8")
+            subagents = types.ModuleType("helpers.subagents")
+            subagents.get_paths = lambda *args: [str(tool)]
+            self.runtime._ASYNC_PARALLEL_SOURCE_HASHES = {
+                path.name: self.runtime.hashlib.sha256(path.read_text(encoding="utf-8").encode()).hexdigest()
+                for path in (tool, scheduler)}
+            with patch.dict(sys.modules, {subagents.__name__: subagents}), patch.object(
+                    self.runtime.importlib.util, "find_spec", return_value=types.SimpleNamespace(origin=str(scheduler))):
+                agent = Agent()
+                agent.config = object()
+                agent.context = types.SimpleNamespace(agent0=agent, config=agent.config)
+                self.assertTrue(self.runtime.native_async_parallel_supported(agent))
+                scheduler.write_text("changed host", encoding="utf-8")
+                self.assertFalse(self.runtime.native_async_parallel_supported(agent))
+
     def test_parallel_batch_requires_both_safety_opt_ins_and_uses_native_shape(self):
+        self.runtime.native_async_parallel_supported = lambda agent: True
         alpha = {"tool_name": "memory_load", "tool_args": {"query": "alpha"},
                  "independent_while_main": True, "parallel_safe": True}
         bravo = {"tool_name": "memory_load", "tool_args": {"query": "bravo"},
@@ -1369,6 +1800,7 @@ class RoutingTests(unittest.TestCase):
         self.assertTrue(any(event[0][1] == "parallel_started" for event in self.timeline_events))
 
     def test_parallel_wait_policy_requires_terminal_job_results_before_next_s1_decision(self):
+        self.runtime.native_async_parallel_supported = lambda agent: True
         actions = {
             key: {"tool_name": "memory_load", "tool_args": {"query": key},
                   "independent_while_main": True, "parallel_safe": True}
@@ -1391,6 +1823,7 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(state["owner"], "system_1")
 
     def test_independent_batch_can_run_before_main_is_requested(self):
+        self.runtime.native_async_parallel_supported = lambda agent: True
         actions = {key: {"tool_name": "memory_load", "tool_args": {"query": key},
                          "independent_while_main": True, "parallel_safe": True}
                    for key in ("alpha", "bravo")}
@@ -1405,11 +1838,12 @@ class RoutingTests(unittest.TestCase):
             agent, state, types.SimpleNamespace(choose=decide), "Inspect this page", actions,
             "alpha", self.config["policy"], "Inspect this page", 0.85))
 
-        self.assertTrue(json.loads(batch)["tool_args"]["wait"])
-        self.assertEqual(state["owner"], "system_1")
+        self.assertFalse(json.loads(batch)["tool_args"]["wait"])
+        self.assertEqual(state["owner"], "main")
         self.assertEqual(state["used_action_ids"], {"alpha", "bravo"})
 
     def test_parallel_batch_rechecks_a_threshold_changed_while_selecting_children(self):
+        self.runtime.native_async_parallel_supported = lambda agent: True
         actions = {
             key: {"tool_name": "memory_load", "tool_args": {"query": key},
                   "independent_while_main": True, "parallel_safe": True}
