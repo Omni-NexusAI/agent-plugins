@@ -25,7 +25,14 @@ The timeline records a separate observation marker after a successful host
 result, or a failure marker after a failed host result, without copying its
 content or arguments. A failed result is never decision or binding evidence.
 If an eligible action falls below the configured confidence threshold, the
-handoff detail says so rather than claiming that no action was eligible.
+handoff detail says so rather than claiming that no action was eligible. The
+same S1 step names the proposed host tool without presenting it as an executed
+action; handoffs without a proposed tool display `None`. Keep tool arguments,
+request content, and credentials out of the timeline.
+When System 1 chooses `wait_main` with independent actions offered, record the
+number offered and actual wait duration. An offered action is policy eligible,
+not necessarily appropriate for the request; do not label it as missed work
+without checking its relevance and dependencies.
 When System 1 finishes after observed tools, a foreground Main call receives
 a bounded continuation note listing validated tool names and masked result
 excerpts only for actions whose policy permits sharing results with the

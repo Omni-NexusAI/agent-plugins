@@ -21,7 +21,13 @@ eligible action, delegated to a specialist, or handed off to Main, plus backend,
 elapsed time, and confidence when available. Native Gen and Tool steps remain
 unchanged. For a selected action, S1 names the tool submitted to Agent Zero;
 the native Tool step shows its actual execution and result. The S1 detail
-intentionally omits request text and tool arguments.
+also names a proposed tool when confidence or a changed task prevents its
+execution. A handoff with no proposed tool says `None`, so the record does not
+imply that a call ran. It intentionally omits request text and tool arguments.
+If System 1 chooses to await Main despite policy-eligible independent choices,
+the timeline records the number of offered alternatives and the time spent
+waiting. Eligibility does not establish that an alternative was relevant to
+the user's task.
 These mode toggles are global across model presets and agent profiles. Existing
 per-section connections migrate to Decider on read when they agree among
 enabled modes. If enabled modes have different saved connections, choose the

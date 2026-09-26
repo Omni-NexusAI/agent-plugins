@@ -16,6 +16,7 @@ _EVENTS = {
     "main_action": ("Main selected action", "Host action pending"),
     "main_delegate": ("Main delegated to System 1", "Bounded choice pending"),
     "independent_action": ("Independent System 1 action", "Main reasoning continues"),
+    "main_wait": ("System 1 waited for Main", "Main reasoning was pending"),
     "parallel_started": ("Parallel actions started", "Awaiting host results"),
     "parallel_observed": ("Parallel results observed", "Results available for decisions"),
     "parallel_failed": ("Parallel action failed", "Main will assess the failure"),
@@ -61,7 +62,8 @@ def start_main_step(agent) -> None:
 
 
 def finish_main_step(agent, route: str, *, confidence: float | None = None,
-                     detail: str = "", action_name: str = "") -> None:
+                     detail: str = "", action_name: str = "",
+                     proposed_tool_name: str = "") -> None:
     """Finalize the same record without storing prompts, arguments, or secrets."""
     try:
         params = _temporary(agent)
@@ -76,6 +78,13 @@ def finish_main_step(agent, route: str, *, confidence: float | None = None,
             kvps["Confidence"] = f"{confidence:.1%}"
         if action_name:
             kvps["Action"] = str(action_name)[:120]
+        if route == "Handed off to Main":
+            kvps["Proposed tool"] = (
+                proposed_tool_name
+                if isinstance(proposed_tool_name, str)
+                and re.fullmatch(r"[A-Za-z0-9_.:-]{1,120}", proposed_tool_name)
+                else "None"
+            )
         if detail:
             kvps["Outcome"] = detail
         record["item"].update(heading=f"System 1 · Main: {route.lower()}", kvps=kvps)
@@ -103,7 +112,8 @@ def record_main_observation(agent, tool_name: str) -> None:
         return
 
 
-def record_main_event(agent, kind: str, tool_name: str = "", count: int = 0) -> None:
+def record_main_event(agent, kind: str, tool_name: str = "", count: int = 0,
+                      seconds: float | None = None) -> None:
     """Add a fixed-label S1 transition without logging model text or tool data."""
     try:
         event = _EVENTS.get(kind)
@@ -113,7 +123,9 @@ def record_main_event(agent, kind: str, tool_name: str = "", count: int = 0) -> 
         if tool_name and re.fullmatch(r"[A-Za-z0-9_.:-]{1,120}", tool_name):
             kvps["Action"] = tool_name
         if type(count) is int and 1 <= count <= 8:
-            kvps["Actions"] = str(count)
+            kvps["Eligible alternatives" if kind == "main_wait" else "Actions"] = str(count)
+        if kind == "main_wait" and type(seconds) in (int, float) and 0 <= seconds <= 300:
+            kvps["Wait"] = f"{seconds:.2f} s"
         agent.context.log.log(
             type="info", heading=f"System 1 · Main: {event[0].lower()}",
             id=f"system1-main-{uuid.uuid4().hex}", kvps=kvps,

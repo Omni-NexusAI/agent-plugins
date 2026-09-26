@@ -52,6 +52,23 @@ class TimelineTests(unittest.TestCase):
         self.timeline.start_main_step(self.agent)
         self.assertFalse(self.logged)
 
+    def test_handoff_names_proposed_tool_without_claiming_execution(self):
+        self.timeline.start_main_step(self.agent)
+        self.timeline.finish_main_step(
+            self.agent, "Handed off to Main", confidence=0.47,
+            detail="Decision confidence below action threshold",
+            proposed_tool_name="github_mcp_server.get_pull_request_status")
+        kvps = self.item.updates[0]["kvps"]
+        self.assertEqual(kvps["Proposed tool"],
+                         "github_mcp_server.get_pull_request_status")
+        self.assertNotIn("Action", kvps)
+
+    def test_handoff_without_candidate_says_none(self):
+        self.timeline.start_main_step(self.agent)
+        self.timeline.finish_main_step(self.agent, "Handed off to Main",
+                                       detail="No eligible choices")
+        self.assertEqual(self.item.updates[0]["kvps"]["Proposed tool"], "None")
+
     def test_follow_up_step_only_when_another_decision_is_ready(self):
         runtime = sys.modules["usr.plugins.system_1.helpers.runtime"]
         self.agent.loop_data.iteration = 1
@@ -85,6 +102,14 @@ class TimelineTests(unittest.TestCase):
         self.assertNotIn("Action", invalid["kvps"])
         self.assertNotIn("Actions", invalid["kvps"])
         self.assertNotIn("Private request", str(self.logged))
+
+    def test_wait_event_reports_eligible_alternatives_and_duration(self):
+        self.timeline.record_main_event(self.agent, "main_wait", count=2, seconds=1.25)
+        kvps = self.logged[0]["kvps"]
+        self.assertEqual(kvps["Route"], "System 1 waited for Main")
+        self.assertEqual(kvps["Eligible alternatives"], "2")
+        self.assertEqual(kvps["Wait"], "1.25 s")
+        self.assertNotIn("Private request", str(kvps))
 
 
 if __name__ == "__main__":

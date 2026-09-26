@@ -634,11 +634,13 @@ def _consume_main_result(state: dict, result: dict | None) -> str:
     return ""
 
 
-def _main_event(agent, kind: str, *, tool_name: str = "", count: int = 0) -> None:
+def _main_event(agent, kind: str, *, tool_name: str = "", count: int = 0,
+                seconds: float | None = None) -> None:
     """Optional timeline hook; logging never changes routing."""
     try:
         from usr.plugins.system_1.helpers.timeline import record_main_event
-        record_main_event(agent, kind, tool_name=tool_name, count=count)
+        record_main_event(agent, kind, tool_name=tool_name, count=count,
+                          seconds=seconds)
     except Exception:
         pass
 
@@ -1482,6 +1484,7 @@ async def main_decision(agent) -> str | None:
                         finish_main_step(agent, "Handed off to Main", detail="Request or mode changed")
                         return None
                     if result.choice == "wait_main":
+                        wait_started = asyncio.get_running_loop().time()
                         if not task.done():
                             try:
                                 await task
@@ -1490,6 +1493,9 @@ async def main_decision(agent) -> str | None:
                                     raise
                             except Exception:
                                 pass
+                        _main_event(
+                            agent, "main_wait", count=len(independent),
+                            seconds=asyncio.get_running_loop().time() - wait_started)
                         if _turn_state(agent) is not state or not config_for(agent, "main"):
                             _complete(state)
                             finish_main_step(agent, "Handed off to Main", detail="Request or mode changed")
@@ -1592,14 +1598,17 @@ async def main_decision(agent) -> str | None:
                     result.confidence < float(current_policy.get("min_choice_probability", 0.85))):
                 _complete(state)
                 finish_main_step(agent, "Handed off to Main",
-                                 detail="Action confidence or configuration changed")
+                                 detail="Action confidence or configuration changed",
+                                 proposed_tool_name=action["tool_name"])
                 return None
             current = _eligible_actions(
                 agent, current_policy, state, text,
                 independent_only=main_pending and not state["main_guidance"])
             if current.get(result.choice) != offered_actions[result.choice]:
                 _complete(state)
-                finish_main_step(agent, "Handed off to Main", detail="Selected action became stale")
+                finish_main_step(agent, "Handed off to Main",
+                                 detail="Selected action became stale",
+                                 proposed_tool_name=action["tool_name"])
                 return None
             return _submit_action(agent, state, current_policy, result.choice,
                                   action, owner="system_1",
@@ -1617,7 +1626,10 @@ async def main_decision(agent) -> str | None:
                       "No eligible action met the policy")
         finish_main_step(agent, "Handed off to Main",
                          confidence=result.confidence,
-                         detail=detail)
+                         detail=detail,
+                         proposed_tool_name=(
+                             offered_actions[result.choice]["tool_name"]
+                             if result.choice in offered_actions else ""))
     except (DecisionError, ValueError, TypeError, OSError):
         _complete(state)
         finish_main_step(agent, "Handed off to Main", detail="Decision unavailable")

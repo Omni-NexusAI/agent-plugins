@@ -183,6 +183,8 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(self.timeline_events[-1][0][1], "Handed off to Main")
         self.assertEqual(self.timeline_events[-1][1]["detail"],
                          "Decision confidence below action threshold")
+        self.assertEqual(self.timeline_events[-1][1]["proposed_tool_name"],
+                         "memory_load")
 
     def test_host_result_drives_next_decision_without_replaying_action(self):
         self.config["policy"]["action_precedence"] = "main_first"
@@ -576,6 +578,36 @@ class RoutingTests(unittest.TestCase):
         self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
         self.runtime._run_main_correction = correction
         self.assertIsNone(asyncio.run(self.runtime.main_decision(Agent())))
+
+    def test_wait_for_main_records_ready_alternatives(self):
+        self.config["policy"]["action_precedence"] = "main_first"
+        self.config["policy"]["actions"] = {
+            "ready": {"tool_name": "memory_load", "tool_args": {"query": "ready"},
+                      "independent_while_main": True}}
+        calls = 0
+
+        async def decide(_state, _choices):
+            nonlocal calls
+            calls += 1
+            return types.SimpleNamespace(choice="main" if calls == 1 else "wait_main",
+                                         confidence=0.99, backend="jev")
+
+        async def correction(_agent, _state, _timeout):
+            await asyncio.sleep(0.001)
+            return None
+
+        self.runtime.client_for = lambda section, policy: types.SimpleNamespace(choose=decide)
+        self.runtime._run_main_correction = correction
+        agent = Agent()
+        agent.loop_data = types.SimpleNamespace(iteration=0)
+        self.assertTrue(self.runtime.should_decide(agent))
+        self.assertIsNone(asyncio.run(self.runtime.main_decision(agent)))
+        self.assertGreater(calls, 0)
+        waits = [event for event in self.timeline_events
+                 if len(event[0]) > 1 and event[0][1] == "main_wait"]
+        self.assertEqual(len(waits), 1, self.timeline_events)
+        self.assertEqual(waits[0][1]["count"], 1)
+        self.assertGreaterEqual(waits[0][1]["seconds"], 0)
 
     def test_end_turn_cancels_only_owned_advisory_task(self):
         self.config["policy"]["action_precedence"] = "main_first"

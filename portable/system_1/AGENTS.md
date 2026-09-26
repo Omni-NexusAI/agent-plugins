@@ -102,7 +102,9 @@
 - The Agent Zero adapter records a native Info step with a `system1-main-`
   ID for each eligible Main decision, before the native GEN step. It updates each record with
   route, backend, confidence when available, and elapsed time. Never put
-  request text, tool arguments, or credentials in the timeline record. Mark
+  request text, tool arguments, or credentials in the timeline record. Name a
+  selected host tool and, on handoff, distinguish a proposed tool from one
+  that actually ran; display `None` when there was no proposed tool. Mark
   failed host actions as failures, not available observations.
 
 ## Verification

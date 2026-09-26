@@ -71,3 +71,22 @@ The memory index remained readable after test chat ingestion: FAISS loaded with 
 - The Utility-only ambiguous follow-up in the stable-corpus matrix remains an answer-quality failure. More completed, like-for-like trials are required before claiming reliable full-task speed gains, particularly for open-ended mixed prompts. The user's hands-on acceptance remains pending.
 
 The browser, desktop-control, image-capable, and local alternative backend evaluations are later work.
+
+## Proposed-tool and wait visibility follow-up
+
+A live Jev probe in the existing test instance temporarily raised Main's
+confidence threshold to 100% for one read-only GitHub PR-status action. Jev
+proposed `github_mcp_server.get_pull_request_status` at 99% confidence. The S1
+handoff step named it under **Proposed tool**, without claiming that System 1
+executed it; Main subsequently used host tools to answer. The request
+completed, and the saved plugin settings were restored exactly. Handoffs with
+no proposed tool now explicitly display `None`. The focused Python suite
+passed after this change.
+
+The Main timeline also records a `System 1 waited for Main` step when Jev
+chooses to await Main despite independent actions being offered. It reports
+the count of policy-eligible alternatives and the actual wait duration. Those
+alternatives still require task-relevance and dependency review before they
+can be counted as missed action opportunities. Repeated live arrival-rate and
+wait analysis remains to be run; no throughput conclusion follows from the
+existing mixed-task trace alone.
