@@ -1,0 +1,189 @@
+<html>
+<head><title>System 1</title></head>
+<body>
+  <style>
+    .system-one-settings .field-control { min-width: 0; }
+    .system-one-settings .field-control > input,
+    .system-one-settings .field-control > select,
+    .system-one-settings .field-control > textarea { min-width: 0; max-width: 100%; }
+    .system-one-settings .system-one-status-control { flex-wrap: wrap; gap: 0.5rem; }
+    .system-one-settings .system-one-status-control > select { flex: 1 1 12rem; width: auto; }
+    .system-one-settings .system-one-status-control > button { flex: 0 0 auto; }
+    .system-one-settings .system-one-status-control > span { flex: 1 1 8rem; overflow-wrap: anywhere; }
+    .system-one-settings .system-one-validation-error { color: var(--color-error, #e74c3c); margin-top: 0.35rem; font-size: var(--font-size-small); }
+    @media (max-width: 768px) {
+      .system-one-settings .field { display: block; }
+      .system-one-settings .field-label { padding-right: 0; }
+      .system-one-settings .field-control { width: 100%; }
+      .system-one-settings .field-control > input,
+      .system-one-settings .field-control > select,
+      .system-one-settings .field-control > textarea { width: 100%; }
+    }
+  </style>
+  <div class="system-one-settings" x-data="{ status: 'Not checked', busy: false, section: 'main', actionError: '', routeError: '',
+    initValidation(root, parent) {
+      this.validationRoot = root;
+      this.validationContext = parent;
+      this.originalSave = parent.save;
+      this.hadOwnSave = Object.prototype.hasOwnProperty.call(parent, 'save');
+      const view = this;
+      this.guardedSave = function(...args) {
+        if (!view.validateDrafts()) return;
+        return view.originalSave.apply(parent, args);
+      };
+      parent.save = this.guardedSave;
+    },
+    activateModalFocus(root) {
+      const modal = root.closest('.modal');
+      if (!modal) return;
+      const focusables = () => Array.from(modal.querySelectorAll(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]'
+      )).filter(element => element.tabIndex >= 0 && element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden');
+      this.focusModalRoot = modal;
+      this.focusModalHandler = event => {
+        if (event.key !== 'Tab') return;
+        const items = focusables();
+        if (!items.length) return;
+        const first = items[0], last = items[items.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      };
+      modal.addEventListener('keydown', this.focusModalHandler);
+      if (!modal.contains(document.activeElement)) {
+        const preferred = root.querySelector('[data-system-one-focus]');
+        (preferred || focusables()[0])?.focus();
+      }
+    },
+    cleanupValidation() {
+      const parent = this.validationContext;
+      if (parent && parent.save === this.guardedSave) {
+        if (this.hadOwnSave) parent.save = this.originalSave;
+        else delete parent.save;
+      }
+      this.focusModalRoot?.removeEventListener('keydown', this.focusModalHandler);
+      this.focusModalRoot = null;
+      this.focusModalHandler = null;
+    },
+    validateJson(kind, element, settings) {
+      const actions = kind === 'actions';
+      const message = actions ? 'Enter a JSON object of fixed actions.' : 'Enter a JSON array of exact Utility routes.';
+      const draft = element.value;
+      try {
+        const parsed = JSON.parse(draft || (actions ? '{}' : '[]'));
+        if (actions ? !parsed || Array.isArray(parsed) || typeof parsed !== 'object' : !Array.isArray(parsed)) throw new Error('Invalid shape');
+        if (actions) {
+          settings.policy._actions_json = draft;
+          settings.policy.actions = parsed;
+          this.actionError = '';
+        } else {
+          settings.utility._fixed_routes_json = draft;
+          settings.utility.fixed_routes = parsed;
+          this.routeError = '';
+        }
+        element.setCustomValidity('');
+        return true;
+      } catch {
+        if (actions) this.actionError = message;
+        else this.routeError = message;
+        element.setCustomValidity(message);
+        return false;
+      }
+    },
+    validateDrafts() {
+      const root = this.validationRoot;
+      const parent = this.validationContext;
+      if (!root || !parent || !parent.settings) return false;
+      const actions = root.querySelector('[data-system-one-draft=actions]');
+      const routes = root.querySelector('[data-system-one-draft=routes]');
+      if (!actions || !routes) return false;
+      const actionValid = this.validateJson('actions', actions, parent.settings);
+      const routeValid = this.validateJson('routes', routes, parent.settings);
+      if (actionValid && routeValid) {
+        if (parent.error === 'Correct invalid System 1 JSON before saving.') parent.error = null;
+        return true;
+      }
+      parent.error = 'Correct invalid System 1 JSON before saving.';
+      const invalid = actionValid ? routes : actions;
+      invalid.focus();
+      invalid.reportValidity();
+      return false;
+    },
+    applyPreset() {
+      const presets = {
+        fast: { min_choice_probability: 0.7, timeout_seconds: 1.0, monitor_interval_seconds: 0.25 },
+        balanced: { min_choice_probability: 0.85, timeout_seconds: 2.0, monitor_interval_seconds: 0.5 },
+        conservative: { min_choice_probability: 0.95, timeout_seconds: 3.0, monitor_interval_seconds: 1.0 }
+      };
+      Object.assign(config.policy, presets[config.policy.preset] || presets.balanced);
+    },
+    async check() {
+      this.busy = true;
+      try {
+        const { fetchApi } = await import('/js/api.js');
+        const response = await fetchApi('/plugins/system_1/status', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ section: this.section, check: true })
+        });
+        const result = await response.json();
+        this.status = result.status || 'Unavailable';
+      } catch { this.status = 'Unavailable'; }
+      finally { this.busy = false; }
+    } }" x-init="config.policy.max_actions_per_turn ??= 3; config.policy.max_result_chars ??= 2000; config.utility.fixed_routes ??= []; initValidation($el, context); $nextTick(() => activateModalFocus($el))" x-destroy="cleanupValidation()">
+    <div class="section-title">System 1</div>
+    <div class="section-description">Finite-choice decisions use the shared Decider Model. Agent Zero still validates and executes actions.</div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Decider status</div><div class="field-description">Checks the shared decision service for the selected enabled mode.</div></div>
+      <div class="field-control system-one-status-control"><select x-model="section" data-system-one-focus><option value="main">Main</option><option value="utility">Utility</option><option value="embedding">Embedding</option></select><button type="button" @click="check()" :disabled="busy">Check connection</button><span role="status" aria-live="polite" x-text="busy ? 'Checking…' : status"></span></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Decision preset</div><div class="field-description">Starting values for confidence, timeout, and monitoring. Each can be adjusted below.</div></div>
+      <div class="field-control"><select x-model="config.policy.preset" @change="applyPreset()"><option value="fast">Fast</option><option value="balanced">Balanced</option><option value="conservative">Conservative</option></select></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Action eligibility</div><div class="field-description">Configured tool names with fixed or validated request/result arguments. System 1 may choose these actions; Agent Zero executes them. Uncertain or open-ended steps go to Main. Set parallel_safe for each action that may run concurrently with other independent actions.</div></div>
+      <div class="field-control"><textarea data-system-one-draft="actions" x-model="config.policy._actions_json" @input="validateJson('actions', $el, config)" @blur="validateJson('actions', $el, config)" :aria-invalid="actionError ? 'true' : 'false'" aria-describedby="system-one-actions-error" x-init="config.policy._actions_json = JSON.stringify(config.policy.actions || {}, null, 2)" spellcheck="false"></textarea><div id="system-one-actions-error" class="system-one-validation-error" x-show="actionError" x-text="actionError" role="alert"></div></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Utility fixed responses</div><div class="field-description">Optional exact system/message pairs and predeclared response choices. Verified memory query and candidate-filter calls can also use Decider; uncertain and open-ended calls use Utility.</div></div>
+      <div class="field-control"><textarea data-system-one-draft="routes" x-model="config.utility._fixed_routes_json" @input="validateJson('routes', $el, config)" @blur="validateJson('routes', $el, config)" :aria-invalid="routeError ? 'true' : 'false'" aria-describedby="system-one-routes-error" x-init="config.utility._fixed_routes_json = JSON.stringify(config.utility.fixed_routes || [], null, 2)" spellcheck="false"></textarea><div id="system-one-routes-error" class="system-one-validation-error" x-show="routeError" x-text="routeError" role="alert"></div></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Actions per turn</div><div class="field-description">Maximum System 1 actions before the next step goes to Main.</div></div>
+      <div class="field-control"><input type="number" min="1" max="8" step="1" x-model.number="config.policy.max_actions_per_turn" /></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Observed result limit</div><div class="field-description">Maximum characters from a tool result passed to the next System 1 decision when that action allows it.</div></div>
+      <div class="field-control"><input type="number" min="1" max="4000" step="1" x-model.number="config.policy.max_result_chars" /></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Minimum choice probability</div><div class="field-description">Lower confidence escalates to the normal model.</div></div>
+      <div class="field-control"><input type="number" min="0" max="1" step="0.01" x-model.number="config.policy.min_choice_probability" /></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Backend timeout, seconds</div><div class="field-description">Decision failures use the normal model.</div></div>
+      <div class="field-control"><input type="number" min="0.1" max="30" step="0.1" x-model.number="config.policy.timeout_seconds" /></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Monitoring interval, seconds</div><div class="field-description">Minimum time between bounded event checks.</div></div>
+      <div class="field-control"><input type="number" min="0.1" max="10" step="0.1" x-model.number="config.policy.monitor_interval_seconds" /></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Monitoring check limit</div><div class="field-description">Maximum decisions per task while Main works.</div></div>
+      <div class="field-control"><input type="number" min="1" max="100" x-model.number="config.policy.monitor_max_checks" /></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Monitoring duration, seconds</div><div class="field-description">Stops the decision lane after this duration.</div></div>
+      <div class="field-control"><input type="number" min="1" max="300" x-model.number="config.policy.monitor_max_seconds" /></div>
+    </div>
+    <div class="field">
+      <div class="field-label"><div class="field-title">Action precedence</div><div class="field-description">When an auxiliary Tool model is enabled, choose which role evaluates a task first.</div></div>
+      <div class="field-control"><select x-model="config.policy.action_precedence"><option value="main_first">Main System 1 first</option><option value="tool_first">Tool model first</option></select></div>
+    </div>
+  </div>
+</body>
+</html>

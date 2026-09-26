@@ -7,6 +7,7 @@
     {"id": "_multi_source_updater", "source": "plugins/_multi_source_updater", "frameworks": ["Agentspine"], "status": "active", "distribution_repository": null},
     {"id": "ai_link_bridge", "source": "plugins/ai_link_bridge", "frameworks": ["Agent Zero", "Agentspine"], "status": "development", "distribution_repository": null},
     {"id": "browser_session_sync", "source": "plugins/browser_session_sync", "frameworks": ["Agent Zero", "Agentspine"], "status": "active", "distribution_repository": "Omni-NexusAI/browser_session_sync", "preserve_destination_paths": ["index.yaml"]},
-    {"id": "provider_profiles", "source": "plugins/provider_profiles", "frameworks": ["Agent Zero", "Agentspine"], "status": "active", "distribution_repository": null}
+    {"id": "provider_profiles", "source": "plugins/provider_profiles", "frameworks": ["Agent Zero", "Agentspine"], "status": "active", "distribution_repository": null},
+    {"id": "system_1", "source": "plugins/system_1", "portable_source": "portable/system_1", "frameworks": ["Agent Zero"], "status": "development", "distribution_repository": null}
   ]
 }

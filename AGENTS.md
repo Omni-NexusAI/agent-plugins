@@ -9,7 +9,7 @@ This repo is the Omni-NexusAI Agent Plugins monorepo. It holds existing Agent Ze
 ## Ownership
 
 - `plugins/` contains installable Agent Zero-style packages and retained historical sources.
-- `portable/` contains future multi-framework plugin sources; it is not an installable package directory.
+- `portable/` contains multi-framework plugin sources; it is not an installable package directory. System 1 is assembled into `plugins/system_1/`.
 - `catalog.json` records source paths, framework compatibility, status, and verified distribution repositories.
 - `sync-to-repos.sh` previews cataloged packages and publishes only an explicitly selected active package to an existing standalone repository through a pull request.
 - `CONTAINER_SYNC.md` records source provenance and compatibility boundaries for existing packages.
