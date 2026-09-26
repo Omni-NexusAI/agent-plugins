@@ -316,19 +316,21 @@ the original Utility call. The patched native host repeated eight labeled chats
 against the initialized corpus, with identical models, prompt, answer criteria,
 Embedding off, ingestion off, and a temporary 8000-character decision limit.
 
-| Main mode | Utility mode | Complete task times | Native recall times | Utility calls avoided |
+| Main mode | Utility mode | Client wall times through completion verification | Native recall times | Utility calls avoided |
 | --- | --- | --- | --- | --- |
 | Off | Off | 24.30 / 23.64 s | 7.93 / 6.97 s | 0 of 4 |
 | On | Off | 28.44 / 25.25 s | 12.35 / 10.52 s | 0 of 4 |
 | Off | On | 19.27 / 30.06 s | 3.28 / 3.35 s | 2 of 4 (50%) |
 | On | On | 16.39 / 17.86 s | 3.77 / 3.93 s | 2 of 4 (50%) |
 
+The client wall times include post-response source, configuration, idle and
+metrics verification; they are not clean prompt-to-final-response latency.
 These two-trial ranges describe this task only. Utility-on avoided relevance
 generation in all four enabled turns; query generation remained ordinary Utility.
 Each filtering decision added 0.20–0.25 s. Utility-only recall was consistently
-shorter here, but its mean complete-task time was slightly longer than both-off.
-Both-on averaged 17.13 s versus 23.97 s both-off (28.6% shorter in this sample),
-not a general latency or causal attribution claim. This no-action memory task
+shorter here, but its mean verified client wall time was slightly longer than
+both-off. Both-on averaged 17.13 s versus 23.97 s both-off including verification
+overhead, not a clean final-response speed or causal attribution claim. This no-action memory task
 does not measure Main delegation performance; the separate overlap trials do.
 
 All eight completed answers passed semantic review for current facts, safe
