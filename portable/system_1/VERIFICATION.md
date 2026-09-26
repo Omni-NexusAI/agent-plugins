@@ -341,3 +341,31 @@ presented as current. Every completion barrier passed. Both initialized fixture
 and default index hashes remained unchanged, and original plugin, memory and
 model settings were verified restored. The saved 4000-character limit was not
 changed; larger filtering payloads can still fall back under that setting.
+
+### Observed final-answer timing
+
+A further eight matched chats separated lightweight final-response observation
+from the full completion barrier. Timing starts immediately before message POST
+and stops when persisted history first shows a finished, nondeferred task answer,
+polled every 0.5 s. Source/configuration/idle/metrics checks run afterward for
+restoration safety. Native response creation timestamps are not final timestamps.
+
+| Main mode | Utility mode | Observed final answer | Mean | Native recall |
+| --- | --- | --- | --- | --- |
+| Off | Off | 26.99 / 32.88 s | 29.93 s | 8.88 / 20.40 s |
+| On | Off | 23.81 / 23.92 s | 23.87 s | 6.84 / 6.99 s |
+| Off | On | 19.11 / 21.89 s | 20.50 s | 4.79 / 5.22 s |
+| On | On | 15.63 / 17.70 s | 16.66 s | 2.84 / 3.95 s |
+
+All eight completed answers passed semantic review, all completion barriers
+passed, and both corpus hashes and restored settings matched. Each Utility-on
+cell avoided two of four real Utility calls (50%); all four filtering decisions
+completed without fallback, adding 0.22–0.29 s each. Ordinary Utility still wrote
+the four enabled-turn queries. The memory-only task used no Main action choices.
+
+Observed final time includes client queue/network time, polling visibility delay
+and filesystem persistence lag; it is not exact server completion time. Two
+trials per cell and the variable baseline recall spans do not establish a general
+speed guarantee or attribute every timing difference to the plugin. The measured
+benefit is successful bounded filtering with fewer Utility generations; the
+component and complete-answer timings have explicit, separate boundaries.
