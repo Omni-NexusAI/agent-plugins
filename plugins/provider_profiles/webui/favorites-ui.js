@@ -100,7 +100,7 @@ export async function install() {
     if (store) return store;
     const found = globalThis.Alpine?.store?.("modelConfig");
     if (!found) return null;
-    if (settings.favorites_ui !== "on" && core.detectHostFavorites(Object.keys(found))) {
+    if (state.settings.favorites_ui !== "on" && core.detectHostFavorites(Object.keys(found))) {
       console.info("Provider Profiles: host provides its own model favorites; favorites UI disabled.");
       instance.dispose();
       return null;
@@ -243,7 +243,18 @@ export async function install() {
         applyOp({ kind: "set", on: false, type: modelType(), provider: entry.provider, apiBase: entry.api_base, name: entry.name });
       }, { signal: fieldSignal });
       row.append(star);
+      row.tabIndex = 0;
       row.addEventListener("click", () => applyFavorite(entry), { signal: fieldSignal });
+      row.addEventListener("keydown", (event) => {
+        if (event.target !== row) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          applyFavorite(entry);
+        } else if (event.key === "Escape") {
+          closeCard();
+          input.focus();
+        }
+      }, { signal: fieldSignal });
       return row;
     }
 
@@ -441,7 +452,7 @@ export async function install() {
       return scope && typeof scope.doSearch === "function" && scope.model && core.MODEL_TYPES.includes(scope.modelType);
     }, 8000, 50);
     if (!ready || instance.disposed || !input.isConnected) { attached.delete(input); return; }
-    if (settings.favorites_ui !== "on" && fc.querySelector('[class*="favorite" i]:not([class*="pp-"])')) return;
+    if (state.settings.favorites_ui !== "on" && fc.querySelector('[class*="favorite" i]:not([class*="pp-"])')) return;
     if (!ensureStore()) { attached.delete(input); return; }
     try { createField(input, fc); } catch (error) { console.warn("Provider Profiles: favorites unavailable for a field", error); }
   }

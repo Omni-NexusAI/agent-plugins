@@ -1,7 +1,13 @@
 /* Provider Profiles: model favorites. Everything is prefixed pp- and uses the host's CSS variables. */
 
+/* The host input carries an inline padding-right, so this must be !important to leave room for the stars. */
 .field-control.pp-has-star > input[type="text"] {
-  padding-right: 62px;
+  padding-right: 62px !important;
+}
+
+.pp-card-row:focus-visible {
+  outline: 1px solid var(--color-accent, #f5b301);
+  outline-offset: -1px;
 }
 
 .pp-star {

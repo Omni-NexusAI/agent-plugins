@@ -205,6 +205,20 @@ class FavoritesUiMixin:
         page.wait_for_function(f"() => ({EDITOR}).presets[1].chat.name === 'meta/llama-3'")
         self.assertEqual(page.evaluate(f"() => ({EDITOR}).presets[0].chat.name"), "deepseek/deepseek-v4")
 
+    def test_card_rows_work_from_the_keyboard(self):
+        page = self.open_fav(entries=[("chat", "openrouter", "", "meta/llama-3")])
+        page.click(CHAT_INPUT)
+        page.wait_for_selector(CHAT_CARD)
+        page.focus("#slot-chat .pp-card-row")
+        page.keyboard.press("Enter")
+        page.wait_for_function(f"() => ({EDITOR}).selectedPreset.chat.name === 'meta/llama-3'")
+        self.assertEqual(page.locator(CHAT_CARD).count(), 0)
+
+    def test_long_names_do_not_run_under_the_stars(self):
+        page = self.open_fav()
+        padding = page.eval_on_selector(CHAT_INPUT, "e => getComputedStyle(e).paddingRight")
+        self.assertEqual(padding, "62px", "the host's inline padding-right must be overridden")
+
     # ---------------------------------------------------------------- lifecycle and safety
     def test_vision_slot_rebuild_reattaches(self):
         page = self.open_fav()
