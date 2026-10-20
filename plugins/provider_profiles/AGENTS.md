@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`provider_profiles` owns provider-aware model memory for compatible Agent Zero model configuration UIs.
+`provider_profiles` owns provider-aware model memory, per-model-type model favorites, and (planned, second PR) local-endpoint model discovery for compatible official Agent Zero model configuration UIs.
 
 ## Sync Status
 
@@ -27,6 +27,26 @@
 - Clear stale model names only when the plugin config says to do so.
 - Degrade safely when the target model config store is absent.
 - Do not describe this plugin as synced from the current GPU-pre container until it is actually present there and copied from that state.
+
+## Host Compatibility Contract (in progress on `feat/provider-profiles-favorites`)
+
+- Supported hosts: official Agent Zero **v2.11** (compatibility floor; what the owner runs today) and **v2.14** (latest when this contract was written, 2026-10-13). Newer releases are checked with `tests/compat/check_upstream.py <tag>` before an Agent Zero upgrade. Agentspine is not a target: its built-in `_provider_profiles` is a separate package and the Spine 9.9 startup sanitizer archives `usr/plugins/provider_profiles`.
+- Plugin-only and additive: never edit host files, never ship provider ids through plugin `conf/model_providers.yaml`, and namespace everything (`pp-` CSS prefix, `__providerProfiles` global, `/api/plugins/provider_profiles/*`).
+- Every `Alpine.store("modelConfig")` patch is flag-guarded, forwards all arguments, never creates a missing member, falls back to the previous implementation on error, and is disposable.
+- With `favorites_ui: off` and `normal_results_mode: core`, request bodies and DOM equal official behavior.
+- If the host ships native model favorites, the plugin yields and injects no favorites UI.
+
+## Favorites Contract (in progress)
+
+- Per model type (`chat`, `vision`, `utility`, `embedding`); unlimited (cap 1000 per type, explicit error); identity is provider + API base + model name; the API base is canonicalized (trim, lowercase scheme and host, strip trailing slash and one trailing `/v1`); API bases with credentials or query strings are rejected.
+- Starring counts as use. The favorites card pins the most recently selected `favorites_shown` (default 5) and offers "Show all N". Choosing a favorite fills Provider, API base and name together.
+- Favorites stay pinned while typing (matching first); typing narrows only the normal results; opening a field that already has a value shows all models, matches first (`normal_results_mode: narrow`, the one deliberate deviation from official request payloads).
+- Storage is server-side `usr/plugins/provider_profiles/favorites.json`, never the plugin `config.json` (the Settings page Save/Reset replaces that whole file). Writes are lock-file protected, atomic, with a `.bak` and quarantine of corrupt files.
+- The existing per-provider last-model restore stays and is fixed for Agent Zero v2.14 (`_kwargs_text` stays in sync with restored `kwargs`).
+
+## Local Discovery Contract (planned, second PR)
+
+- Layers on top of the host `model_search`; never replaces it. Server-side and GET-only, gated on the resolved IP class (loopback, RFC1918, CGNAT allowed; link-local and metadata blocked), no redirects, no query strings, first stored API key only and only sent to private hosts, no model load or unload call ever, and llama.cpp `status.args` / `status.preset` are never forwarded.
 
 ## Work Guidance
 
