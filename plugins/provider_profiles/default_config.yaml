@@ -1,4 +1,6 @@
-history_storage_key: modelConfig_providerHistory
+favorites_ui: auto
+favorites_shown: 5
+normal_results_mode: narrow
 local_provider_defaults:
   lm_studio: http://host.docker.internal:1234/v1
   ollama: http://host.docker.internal:11434
