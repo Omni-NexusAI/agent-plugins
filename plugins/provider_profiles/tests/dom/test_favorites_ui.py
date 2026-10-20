@@ -230,6 +230,26 @@ class FavoritesUiMixin:
         page.wait_for_function("!document.querySelector('#slot-chat .pp-star-input').classList.contains('pp-star-on')")
         self.assertEqual(self.stored(), [("openrouter", "", "keep-1")])
 
+    def test_card_stays_open_when_the_host_swaps_from_no_results_to_results(self):
+        # Regression found on a live instance: the host hides "No models found" before it shows the results.
+        page = self.open_fav(favorites={"normal_results_mode": "core"}, entries=[("chat", "openrouter", "", "meta/llama-3")])
+        page.fill(CHAT_INPUT, "")
+        page.click(CHAT_INPUT)
+        page.keyboard.type("zzzz", delay=20)
+        page.wait_for_function("document.querySelector('#slot-chat .model-search-results:nth-of-type(2)') !== null", timeout=3000)
+        page.wait_for_timeout(700)
+        page.fill(CHAT_INPUT, "qwen")
+        page.wait_for_selector(CHAT_ROWS, timeout=5000)
+        page.wait_for_timeout(800)
+        self.assertEqual(page.locator(CHAT_CARD).count(), 1, "card must survive the host's result swap")
+
+    def test_card_closes_after_the_host_dropdown_really_closes(self):
+        page = self.open_fav(entries=[("chat", "openrouter", "", "meta/llama-3")])
+        page.click(CHAT_INPUT)
+        page.wait_for_selector(CHAT_ROWS)
+        page.mouse.click(5, 5)
+        page.wait_for_selector(CHAT_CARD, state="detached", timeout=3000)
+
     def test_card_rows_work_from_the_keyboard(self):
         page = self.open_fav(entries=[("chat", "openrouter", "", "meta/llama-3")])
         page.click(CHAT_INPUT)

@@ -8,12 +8,12 @@
 //   * debounced type-ahead through the field scope's own doSearch()
 // Every step is guarded: on any failure the host dropdown keeps working unchanged.
 
-// The loader cache-busts this entry with ?v=<version>; siblings get the same query so a plugin upgrade
-// can never pair a new entry with a stale cached module.
-const V = new URL(import.meta.url).search;
-const core = await import(`./favorites-core.js${V}`);
-const api = await import(`./favorites-api.js${V}`);
-const { installStorePatch } = await import(`./store-patch.js${V}`);
+// Sibling modules are imported by the loader with the same ?v=<version> query and injected into install()
+// (no static sibling imports, no top-level await): a plugin upgrade can never pair a new entry with a stale
+// cached module, and module evaluation cannot stall.
+let core;
+let api;
+let installStorePatch;
 
 const VERSION = "1.1.0";
 const GLOBAL = "__providerProfilesFavorites";
@@ -54,7 +54,8 @@ function hostLabel(apiBase) {
   try { return new URL(apiBase).host; } catch { return ""; }
 }
 
-export async function install() {
+export async function install(deps) {
+  ({ core, api, installStorePatch } = deps);
   const existing = globalThis[GLOBAL];
   if (existing && existing.version === VERSION && !existing.disposed) return existing;
   try { existing?.dispose?.(); } catch { /* ignore */ }
@@ -113,7 +114,7 @@ export async function install() {
       return null;
     }
     store = found;
-    storePatch = installStorePatch(store, () => state.settings);
+    storePatch = installStorePatch(store, () => state.settings, { groupForTyping: core.groupForTyping });
     return store;
   };
 
@@ -189,13 +190,23 @@ export async function install() {
     fc.append(card);
     injected.push(card);
 
+    // Keep the host results box flush below the card even when the card's height changes after render (fonts, wrapping).
+    let resizeWatcher = null;
+    try {
+      resizeWatcher = new ResizeObserver(() => {
+        if (!card.hidden) fc.style.setProperty("--pp-h", `${card.offsetHeight}px`);
+      });
+      resizeWatcher.observe(card);
+    } catch { /* older engines: the height measured at render time is used */ }
+
     const paintStar = (button, on, usable, label) => {
       button.textContent = on ? "★" : "☆";
       button.classList.toggle("pp-star-on", on);
       button.setAttribute("aria-pressed", String(on));
       button.disabled = !usable && !on;
-      button.title = on ? "Remove from favorites" : usable ? "Add to favorites" : label;
-      button.setAttribute("aria-label", button.title);
+      // aria-label only: Agent Zero turns every title attribute into a Bootstrap tooltip, and removing such an
+      // element while its tooltip is hiding throws inside Bootstrap.
+      button.setAttribute("aria-label", on ? "Remove from favorites" : usable ? "Add to favorites" : label);
     };
 
     const isFav = (name) => {
@@ -246,12 +257,11 @@ export async function install() {
       row.append(el("span", "pp-chip", entry.provider));
       const host = entry.api_base ? hostLabel(entry.api_base) : "";
       if (host) row.append(el("span", "pp-chip pp-chip-host", host));
-      row.title = `${entry.name}\n${entry.provider}${entry.api_base ? " · " + entry.api_base : ""}`;
+      row.setAttribute("aria-label", `${entry.name} (${entry.provider}${entry.api_base ? ", " + entry.api_base : ""})`);
       const star = el("button", "pp-star pp-star-on", "★");
       star.type = "button";
       star.setAttribute("aria-pressed", "true");
-      star.title = "Remove from favorites";
-      star.setAttribute("aria-label", star.title);
+      star.setAttribute("aria-label", "Remove from favorites");
       star.addEventListener("click", (event) => {
         event.stopPropagation();
         event.preventDefault();
@@ -414,12 +424,25 @@ export async function install() {
       if (ctl.open && !fc.contains(event.target)) closeCard();
     }, { capture: true, signal: fieldSignal });
 
-    // Close with the host dropdown (selection / outside click) once it has been shown.
+    // Close with the host dropdown (selection / outside click) once it has been shown. The host swaps between
+    // its two result boxes with a gap (one hides immediately, the other shows a frame later), so a "hidden"
+    // reading only counts when it persists.
     let wasVisible = false;
+    let closeTimer = null;
     const styleWatcher = new MutationObserver(() => {
-      const visible = coreVisible();
-      if (wasVisible && !visible && ctl.open) closeCard();
-      wasVisible = visible;
+      if (coreVisible()) {
+        wasVisible = true;
+        clearTimeout(closeTimer);
+        return;
+      }
+      if (!wasVisible || !ctl.open || closeTimer) return;
+      closeTimer = setTimeout(() => {
+        closeTimer = null;
+        if (!coreVisible() && ctl.open) {
+          wasVisible = false;
+          closeCard();
+        }
+      }, 300);
     });
     const rowWatcher = new MutationObserver(() => decorateRows());
     for (const box of fc.querySelectorAll(`:scope > ${RESULTS}`)) {
@@ -442,6 +465,8 @@ export async function install() {
       dispose() {
         ac.abort();
         clearTimeout(ctl.timer);
+        clearTimeout(closeTimer);
+        resizeWatcher?.disconnect();
         styleWatcher.disconnect();
         rowWatcher.disconnect();
         try { if (effect) globalThis.Alpine.release(effect); } catch { /* ignore */ }

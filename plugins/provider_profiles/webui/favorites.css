@@ -113,9 +113,7 @@
 .pp-card-name {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-all; /* long names wrap like the host rows (no title tooltip, see favorites-ui.js) */
 }
 
 .pp-chip {

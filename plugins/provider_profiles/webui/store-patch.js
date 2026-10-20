@@ -10,8 +10,6 @@
 //     otherwise it keeps the host's match-first split.
 // normal_results_mode = "core": nothing is changed.
 
-const { groupForTyping } = await import(`./favorites-core.js${new URL(import.meta.url).search}`);
-
 const CACHE_TTL_MS = 6000;
 const SEP = "\u001f";
 
@@ -19,7 +17,7 @@ function copyResult(result) {
   return { ...result, models: Array.isArray(result.models) ? [...result.models] : [] };
 }
 
-export function installStorePatch(store, getSettings) {
+export function installStorePatch(store, getSettings, { groupForTyping }) {
   const undo = [];
   const narrow = () => {
     try { return getSettings()?.normal_results_mode === "narrow"; } catch { return false; }

@@ -78,6 +78,13 @@ class Hygiene(unittest.TestCase):
             for pattern in (r"\.innerHTML\s*=", r"\beval\s*\(", r"window\.fetch\s*=", r"globalThis\.fetch\s*=", r"new Function\s*\("):
                 self.assertIsNone(re.search(pattern, code), f"{path.name} uses {pattern}")
 
+    def test_injected_dom_never_uses_title_attributes(self):
+        # Agent Zero's tooltip store turns every title attribute into a Bootstrap tooltip; removing such an element
+        # while the tooltip hides throws inside Bootstrap (seen live on v2.11).
+        text = (PLUGIN_DIR / "webui" / "favorites-ui.js").read_text(encoding="utf-8")
+        code = "\n".join(line for line in text.splitlines() if not line.strip().startswith("//"))
+        self.assertIsNone(re.search(r"\.title\s*=|setAttribute\(\s*[\"']title[\"']", code))
+
     def test_css_and_dom_names_are_namespaced(self):
         css = (PLUGIN_DIR / "webui" / "favorites.css").read_text(encoding="utf-8")
         own = re.findall(r"\.(pp-[\w-]+)", css)
