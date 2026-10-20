@@ -1,15 +1,32 @@
 <script>
   (() => {
+    const VERSION = "1.1.0";
+    // Profile storage namespace inherited from the Agentspine package; kept so saved profiles stay readable.
     const pluginName = "_provider_profiles";
-    const localDefaults = {
+    const settingsEndpoint = "/plugins/provider_profiles/favorites";
+
+    // Re-executed extension on the same page: keep the live instance, replace an older one.
+    const previous = globalThis.__providerProfiles;
+    if (previous && previous.version === VERSION && !previous.disposed) return;
+    try { previous?.dispose?.(); } catch { /* ignore */ }
+
+    const BUILTIN_LOCAL_DEFAULTS = {
       lm_studio: "http://host.docker.internal:1234/v1",
       ollama: "http://host.docker.internal:11434",
     };
-    const localUrls = Object.values(localDefaults);
-    const modelSections = ["chat_model", "utility_model", "embedding_model"];
+    const settings = {
+      local_provider_defaults: { ...BUILTIN_LOCAL_DEFAULTS },
+      clear_stale_model_on_new_provider: true,
+    };
+    const SECRET_KEYS = new Set(["api_key", "apikey", "api_token", "token", "access_token", "secret", "password", "authorization"]);
+    const modelSections = ["chat_model", "vision_model", "utility_model", "embedding_model"];
+    const controller = new AbortController();
+    const { signal } = controller;
+    const patched = [];
     let backendProfilesPromise = null;
     let backendProfiles = { profiles: {} };
     let wireScheduled = false;
+    let observer = null;
 
     async function fetchApi() {
       const api = await import("/js/api.js");
@@ -28,38 +45,85 @@
       return `${sectionKey}:${providerId(provider)}`;
     }
 
+    function localDefaults() {
+      return settings.local_provider_defaults;
+    }
+
+    function localUrls() {
+      return [...new Set([...Object.values(BUILTIN_LOCAL_DEFAULTS), ...Object.values(localDefaults())])];
+    }
+
     function shouldUseLocalDefault(model) {
       const provider = providerId(model?.provider);
-      if (!(provider in localDefaults)) return false;
+      if (!(provider in localDefaults())) return false;
       const current = (model?.api_base || "").trim();
-      return !current || localUrls.includes(current);
+      return !current || localUrls().includes(current);
     }
 
     function applyLocalDefault(model) {
       const provider = providerId(model?.provider);
-      if (provider in localDefaults && shouldUseLocalDefault(model)) {
-        model.api_base = localDefaults[provider];
+      if (provider in localDefaults() && shouldUseLocalDefault(model)) {
+        model.api_base = localDefaults()[provider];
       }
     }
 
+    function applySettings(incoming) {
+      if (!incoming || typeof incoming !== "object") return;
+      const defaults = incoming.local_provider_defaults;
+      if (defaults && typeof defaults === "object") {
+        for (const key of Object.keys(BUILTIN_LOCAL_DEFAULTS)) {
+          if (typeof defaults[key] === "string" && defaults[key].trim()) {
+            settings.local_provider_defaults[key] = defaults[key].trim();
+          }
+        }
+      }
+      if (typeof incoming.clear_stale_model_on_new_provider === "boolean") {
+        settings.clear_stale_model_on_new_provider = incoming.clear_stale_model_on_new_provider;
+      }
+    }
+
+    async function loadSettings() {
+      try {
+        const request = await fetchApi();
+        const response = await request(settingsEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "settings" }),
+        });
+        if (!response.ok) return settings;
+        const result = await response.json().catch(() => ({}));
+        if (result && result.ok) applySettings(result.settings);
+      } catch {
+        // Settings API unavailable: built-in defaults stay in effect.
+      }
+      return settings;
+    }
+
+    function kwargsToText(store, kwargs) {
+      if (typeof store?.kwargsToText === "function") return store.kwargsToText(kwargs || {});
+      if (!kwargs || typeof kwargs !== "object") return "";
+      return Object.entries(kwargs).map(([k, v]) => {
+        if (typeof v === "string") return k + "=" + JSON.stringify(v);
+        return k + "=" + (typeof v === "object" ? JSON.stringify(v) : String(v));
+      }).join("\n");
+    }
+
+    // Keep every non-internal, non-secret field so settings added by newer hosts
+    // (timeout, max_tokens, override_main, ...) survive a provider switch.
     function normalizeModel(model = {}) {
       const clean = clone(model);
-      for (const key of Object.keys(clean)) {
-        if (key.startsWith("_")) delete clean[key];
+      const out = {};
+      for (const [key, value] of Object.entries(clean)) {
+        if (key.startsWith("_") || SECRET_KEYS.has(key.toLowerCase())) continue;
+        out[key] = value;
       }
       return {
-        provider: clean.provider || "",
-        name: clean.name || "",
-        api_base: clean.api_base || "",
-        ctx_length: clean.ctx_length,
-        ctx_history: clean.ctx_history,
-        ctx_input: clean.ctx_input,
-        vision: Boolean(clean.vision),
-        max_embeds: clean.max_embeds,
-        rl_requests: clean.rl_requests,
-        rl_input: clean.rl_input,
-        rl_output: clean.rl_output,
-        kwargs: clean.kwargs && typeof clean.kwargs === "object" ? clean.kwargs : {},
+        ...out,
+        provider: out.provider || "",
+        name: out.name || "",
+        api_base: out.api_base || "",
+        vision: Boolean(out.vision),
+        kwargs: out.kwargs && typeof out.kwargs === "object" ? out.kwargs : {},
       };
     }
 
@@ -120,14 +184,16 @@
       if (saved) {
         Object.assign(model, clone(saved), { provider: normalizedProvider });
       } else {
-        model.name = "";
-        if (normalizedProvider in localDefaults) {
-          model.api_base = localDefaults[normalizedProvider];
-        } else if (localUrls.includes(model.api_base || "")) {
+        if (settings.clear_stale_model_on_new_provider) model.name = "";
+        if (normalizedProvider in localDefaults()) {
+          model.api_base = localDefaults()[normalizedProvider];
+        } else if (localUrls().includes(model.api_base || "")) {
           model.api_base = "";
         }
       }
       applyLocalDefault(model);
+      // Agent Zero v2.14 rebuilds kwargs from this text on Save; keep it in step with the restored kwargs.
+      model._kwargs_text = kwargsToText(globalThis.Alpine?.store?.("modelConfig"), model.kwargs);
     }
 
     function captureAll(config) {
@@ -167,42 +233,56 @@
       }
     }
 
+    async function applyProviderChange(sectionKey, model, previousProvider, previousSnapshot) {
+      await loadProfiles();
+      if (previousProvider) {
+        captureModel(sectionKey, previousSnapshot || model, previousProvider);
+      }
+      restoreModel(sectionKey, model, model.provider);
+    }
+
     function patchModelConfigStore() {
       const store = globalThis.Alpine?.store?.("modelConfig");
       if (!store || store.__providerProfilesPatched) return;
       store.__providerProfilesPatched = true;
-      store.providerProfilesLocalDefaults = localDefaults;
+      store.providerProfilesLocalDefaults = localDefaults();
       store.providerProfilesCaptureAll = captureAll;
 
-      const originalInstallSettingsHooks = store.installSettingsHooks?.bind(store);
-      if (originalInstallSettingsHooks) {
-        store.installSettingsHooks = function(context) {
-          const result = originalInstallSettingsHooks(context);
-          installContextHooks(context);
+      const originalInstallSettingsHooks = store.installSettingsHooks;
+      if (typeof originalInstallSettingsHooks === "function") {
+        const wrapper = function (...args) {
+          const result = originalInstallSettingsHooks.apply(this, args);
+          installContextHooks(args[0]);
           return result;
         };
+        store.installSettingsHooks = wrapper;
+        patched.push(() => { if (store.installSettingsHooks === wrapper) store.installSettingsHooks = originalInstallSettingsHooks; });
       }
 
-      const originalSearchModelsDetailed = store.searchModelsDetailed?.bind(store);
-      if (originalSearchModelsDetailed) {
-        store.searchModelsDetailed = async function(provider, query, modelType, apiBase) {
+      const originalSearchModelsDetailed = store.searchModelsDetailed;
+      if (typeof originalSearchModelsDetailed === "function") {
+        const wrapper = async function (provider, query, modelType, apiBase, ...rest) {
           const normalized = providerId(provider);
           let resolvedApiBase = apiBase || "";
-          if (!resolvedApiBase && normalized in localDefaults) {
-            resolvedApiBase = localDefaults[normalized];
+          if (!resolvedApiBase && normalized in localDefaults()) {
+            resolvedApiBase = localDefaults()[normalized];
           }
-          return await originalSearchModelsDetailed(provider, query, modelType, resolvedApiBase);
+          return await originalSearchModelsDetailed.call(this, provider, query, modelType, resolvedApiBase, ...rest);
         };
+        store.searchModelsDetailed = wrapper;
+        patched.push(() => { if (store.searchModelsDetailed === wrapper) store.searchModelsDetailed = originalSearchModelsDetailed; });
       }
 
-      store.onProviderProfileChanged = async function(sectionKey, model, previousProvider, previousSnapshot) {
-        await loadProfiles();
-        if (previousProvider) {
-          captureModel(sectionKey, previousSnapshot || model, previousProvider);
-        }
-        restoreModel(sectionKey, model, model.provider);
+      store.onProviderProfileChanged = async function (sectionKey, model, previousProvider, previousSnapshot) {
+        await applyProviderChange(sectionKey, model, previousProvider, previousSnapshot);
         await saveProfiles();
       };
+      patched.push(() => {
+        delete store.onProviderProfileChanged;
+        delete store.providerProfilesLocalDefaults;
+        delete store.providerProfilesCaptureAll;
+        store.__providerProfilesPatched = false;
+      });
     }
 
     function findModelScope(element) {
@@ -212,6 +292,34 @@
 
     function sectionKeyFromScope(scope) {
       return `${scope?.modelType || "chat"}_model`;
+    }
+
+    // Switch a Provider <select> programmatically and resolve after the saved profile is restored.
+    // Callers set api_base / name afterwards. Persisting the profiles is fire-and-forget.
+    async function switchProvider(select, scope, provider) {
+      const target = providerId(provider);
+      const model = scope?.model;
+      if (!select || !model || !target) return { ok: false, reason: "invalid-arguments" };
+      if (![...select.options].some((option) => option.value === target)) return { ok: false, reason: "provider-unavailable" };
+      if (providerId(model.provider) === target) return { ok: true, changed: false };
+
+      const previousProvider = model.provider || "";
+      const previousSnapshot = normalizeModel(model);
+      select.__providerProfilesSkip = true;
+      try {
+        select.dispatchEvent(new Event("focus"));
+        select.value = target;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      } finally {
+        select.__providerProfilesSkip = false;
+      }
+      if (scope.model !== model) return { ok: false, reason: "model-replaced" };
+      await applyProviderChange(sectionKeyFromScope(scope), model, previousProvider, previousSnapshot);
+      saveProfiles();
+      if (scope.model !== model) return { ok: false, reason: "model-replaced" };
+      select.dataset.prevProvider = model.provider || select.value || "";
+      select.__providerProfilesSnapshot = normalizeModel(model);
+      return { ok: true, changed: true };
     }
 
     function wireProviderSelects(root = document) {
@@ -230,10 +338,11 @@
           select.dataset.prevProvider = scope?.model?.provider || select.value || "";
           select.__providerProfilesSnapshot = normalizeModel(scope?.model || {});
         };
-        select.addEventListener("focus", capturePrevious);
-        select.addEventListener("pointerdown", capturePrevious);
-        select.addEventListener("keydown", capturePrevious);
+        select.addEventListener("focus", capturePrevious, { signal });
+        select.addEventListener("pointerdown", capturePrevious, { signal });
+        select.addEventListener("keydown", capturePrevious, { signal });
         select.addEventListener("change", async () => {
+          if (select.__providerProfilesSkip) return;
           const scope = findModelScope(select);
           if (!scope?.model) return;
           const previousProvider = select.dataset.prevProvider || "";
@@ -242,11 +351,12 @@
           await store.onProviderProfileChanged(sectionKey, scope.model, previousProvider, previousSnapshot);
           select.dataset.prevProvider = scope.model.provider || select.value || "";
           select.__providerProfilesSnapshot = normalizeModel(scope.model);
-        });
+        }, { signal });
       });
     }
 
     function scheduleWire(root = document) {
+      if (signal.aborted) return;
       if (root && root.nodeType === 1) {
         const relevant = root.matches?.('select[x-model="model.provider"], .plugin-config-page, .modal')
           || root.querySelector?.('select[x-model="model.provider"], .plugin-config-page, .modal');
@@ -256,19 +366,45 @@
       wireScheduled = true;
       window.requestAnimationFrame(() => {
         wireScheduled = false;
+        if (signal.aborted) return;
         wireProviderSelects(root && root.nodeType === 1 ? root : document);
       });
     }
 
-    document.addEventListener("alpine:init", () => setTimeout(scheduleWire, 0));
-    document.addEventListener("DOMContentLoaded", scheduleWire, { once: true });
+    function dispose() {
+      registry.disposed = true;
+      controller.abort();
+      observer?.disconnect();
+      for (const undo of patched.splice(0)) {
+        try { undo(); } catch { /* ignore */ }
+      }
+      document.querySelectorAll('select[x-model="model.provider"]').forEach((select) => { select.__providerProfilesWired = false; });
+      if (globalThis.__providerProfiles === registry) delete globalThis.__providerProfiles;
+    }
+
+    const registry = {
+      version: VERSION,
+      disposed: false,
+      settings,
+      ready: loadSettings(),
+      normalizeModel,
+      findModelScope,
+      sectionKeyFromScope,
+      switchProvider,
+      dispose,
+    };
+    globalThis.__providerProfiles = registry;
+
+    document.addEventListener("alpine:init", () => setTimeout(scheduleWire, 0), { signal });
+    document.addEventListener("DOMContentLoaded", scheduleWire, { once: true, signal });
     scheduleWire();
-    new MutationObserver((mutations) => {
+    observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
           scheduleWire(node);
         }
       }
-    }).observe(document.body || document.documentElement, { childList: true, subtree: true });
+    });
+    observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
   })();
 </script>
