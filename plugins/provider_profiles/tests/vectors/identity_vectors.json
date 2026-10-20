@@ -1,0 +1,48 @@
+{
+  "canonical_base": [
+    ["", ""],
+    ["   ", ""],
+    ["http://host.docker.internal:1234/v1", "http://host.docker.internal:1234"],
+    ["http://Host.Docker.Internal:1234/v1/", "http://host.docker.internal:1234"],
+    ["http://host.docker.internal:1234", "http://host.docker.internal:1234"],
+    ["https://HOST.example.com:443/api/", "https://host.example.com/api"],
+    ["http://host:80", "http://host"],
+    ["http://host:8080/", "http://host:8080"],
+    ["http://[::1]:8080/V1", "http://[::1]:8080"],
+    ["http://10.0.0.5:8080/v1/v1", "http://10.0.0.5:8080/v1"],
+    ["https://openrouter.ai/api/v1", "https://openrouter.ai/api"],
+    ["  http://100.64.0.9:8096/v1  ", "http://100.64.0.9:8096"]
+  ],
+  "invalid_base": [
+    ["ftp://host/v1", "invalid_api_base"],
+    ["host.docker.internal:1234", "invalid_api_base"],
+    ["http://", "invalid_api_base"],
+    ["http://user:pw@host/v1", "api_base_credentials"],
+    ["http://user@host/v1", "api_base_credentials"],
+    ["http://host/v1?key=abc", "api_base_query"],
+    ["http://host/v1#frag", "api_base_query"],
+    ["http://host/v1?", "api_base_query"]
+  ],
+  "same_identity": [
+    [
+      {"type": "chat", "provider": "LM_Studio", "api_base": "http://host.docker.internal:1234/v1", "name": "qwen3"},
+      {"type": "chat", "provider": "lm_studio", "api_base": "http://HOST.docker.internal:1234", "name": "qwen3"},
+      true
+    ],
+    [
+      {"type": "chat", "provider": "lm_studio", "api_base": "", "name": "qwen3"},
+      {"type": "chat", "provider": "lm_studio", "api_base": "http://host.docker.internal:1234", "name": "qwen3"},
+      false
+    ],
+    [
+      {"type": "chat", "provider": "other", "api_base": "http://a:1/v1", "name": "m"},
+      {"type": "utility", "provider": "other", "api_base": "http://a:1/v1", "name": "m"},
+      false
+    ],
+    [
+      {"type": "chat", "provider": "other", "api_base": "http://a:1/v1", "name": "M"},
+      {"type": "chat", "provider": "other", "api_base": "http://a:1/v1", "name": "m"},
+      false
+    ]
+  ]
+}
