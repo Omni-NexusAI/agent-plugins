@@ -1,6 +1,7 @@
 """Shared Playwright plumbing for the DOM harness tests (skipped when unavailable)."""
 from __future__ import annotations
 
+import tempfile
 import unittest
 from urllib.parse import urlencode
 
@@ -41,8 +42,15 @@ class DomCase(unittest.TestCase):
         cls.browser.close()
         cls._pw.stop()
 
-    def open_harness(self, *, ext="", order="ext-first", setup=None):
+    FAVORITES_EXT = "_10_provider_profiles.html,_20_model_favorites.html"
+
+    def open_harness(self, *, ext="", order="ext-first", setup=None, favorites=None, params=None, init_script=None):
+        """favorites: None = no favorites service; dict = settings overrides for the real store-backed service."""
         server = HarnessServer(self.host)
+        if favorites is not None:
+            tmp = tempfile.TemporaryDirectory()
+            self.addCleanup(tmp.cleanup)
+            server.state.enable_favorites(tmp.name, favorites)
         if setup:
             setup(server.state)
         server.start()
@@ -50,9 +58,11 @@ class DomCase(unittest.TestCase):
         self.server = server
         context = self.browser.new_context(viewport={"width": 900, "height": 900})
         self.addCleanup(context.close)
+        if init_script:
+            context.add_init_script(init_script)
         page = context.new_page()
         self.page = page
-        query = urlencode({"host": self.host, "ext": ext, "order": order})
+        query = urlencode({"host": self.host, "ext": ext, "order": order, **(params or {})})
         page.goto(f"{server.url}/harness.html?{query}")
         page.wait_for_function("window.__ready === true", timeout=15000)
         return page

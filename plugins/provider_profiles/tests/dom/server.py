@@ -48,6 +48,17 @@ class HarnessState:
         self.favorites_status = 200
         self.lock = threading.Lock()
 
+    def enable_favorites(self, directory, overrides=None):
+        """Back /favorites with the real FavoritesStore + handle() (same code the API handler runs)."""
+        from ..loader import load_helper
+
+        store_mod = load_helper("favorites_store")
+        settings_mod = load_helper("settings")
+        self.favorites_settings = settings_mod.merge_settings(overrides or {})
+        counter = iter(range(1_000_000, 10_000_000))  # deterministic, strictly increasing clock
+        self.favorites_store = store_mod.FavoritesStore(Path(directory) / "favorites.json", clock=lambda: float(next(counter)))
+        self.favorites_service = lambda body: store_mod.handle(body, self.favorites_store, self.favorites_settings)
+
     def calls(self, path_suffix: str) -> list[dict]:
         return [r for r in self.requests if r["path"].endswith(path_suffix)]
 
@@ -70,12 +81,15 @@ class Handler(BaseHTTPRequestHandler):
         return self.server.state  # type: ignore[attr-defined]
 
     def _send(self, status: int, body: bytes, content_type: str):
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        except (ConnectionError, OSError):
+            pass  # the page navigated away or closed mid-request
 
     def _json(self, status: int, payload):
         self._send(status, json.dumps(payload).encode(), "application/json")
