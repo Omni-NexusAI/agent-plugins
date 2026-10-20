@@ -46,5 +46,5 @@
   atomic settings persistence, and enhanced STT recorder behavior.
 - `_multi_source_updater/AGENTS.md`: plugin-local source-aware self-update
   selection, persistence, and compatibility UI; it must not copy host files.
-- `provider_profiles/AGENTS.md`: portable provider-aware model, API base, and context-length restore behavior mirroring the GPU-pre container's `_model_config`.
+- `provider_profiles/AGENTS.md`: official-Agent-Zero model favorites (server-side store, favorites card, stars), provider-aware model/API base/context restore, host compatibility contract (v2.11 floor, v2.14 latest; not Agentspine).
 - `ai_link_bridge/AGENTS.md`: development scaffold and AI Link task-dispatch capability boundary.

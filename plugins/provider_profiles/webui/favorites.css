@@ -1,0 +1,153 @@
+/* Provider Profiles: model favorites. Everything is prefixed pp- and uses the host's CSS variables. */
+
+/* The host input carries an inline padding-right, so this must be !important to leave room for the stars. */
+.field-control.pp-has-star > input[type="text"] {
+  padding-right: 62px !important;
+}
+
+.pp-card-row:focus-visible {
+  outline: 1px solid var(--color-accent, #f5b301);
+  outline-offset: -1px;
+}
+
+.pp-star {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0 4px;
+  margin: 0;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--color-text, inherit);
+  opacity: 0.55;
+  user-select: none;
+}
+
+.pp-star:hover:not(:disabled),
+.pp-star:focus-visible {
+  opacity: 1;
+}
+
+.pp-star:disabled {
+  cursor: not-allowed;
+  opacity: 0.25;
+}
+
+.pp-star.pp-star-on {
+  color: var(--color-accent, #f5b301);
+  opacity: 1;
+}
+
+.pp-star-input {
+  position: absolute;
+  right: 34px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+}
+
+.model-search-item.pp-row {
+  position: relative;
+  padding-right: 30px;
+}
+
+.model-search-item.pp-row > .pp-star {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.pp-card {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--color-input, #2a2a2a);
+  border: 1px solid var(--color-border, #555);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 51;
+}
+
+.pp-card[hidden] {
+  display: none;
+}
+
+/* Push the host results box below the card (card height is published as --pp-h). */
+.field-control.pp-open > .model-search-results {
+  top: calc(100% + 8px + var(--pp-h, 0px));
+}
+
+.pp-card-title {
+  padding: 2px 8px 4px;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.pp-card-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 30px 5px 8px;
+  font-size: 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.pp-card-row:hover {
+  background: var(--color-background-hover, rgba(255, 255, 255, 0.06));
+}
+
+.pp-card-row.pp-current {
+  font-weight: 600;
+}
+
+.pp-card-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-all; /* long names wrap like the host rows (no title tooltip, see favorites-ui.js) */
+}
+
+.pp-chip {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  font-size: 0.68rem;
+  border: 1px solid var(--color-border, #555);
+  border-radius: 999px;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+.pp-card-row > .pp-star {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.pp-card-more {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--color-border, #555);
+  color: inherit;
+  opacity: 0.8;
+  cursor: pointer;
+}
+
+.pp-card-more:hover {
+  opacity: 1;
+}

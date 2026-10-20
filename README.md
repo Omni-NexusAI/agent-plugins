@@ -26,7 +26,7 @@ been verified.
 | Plugin | Frameworks | Status |
 | --- | --- | --- |
 | [`browser_session_sync`](plugins/browser_session_sync/) | Agent Zero, Agentspine | Active; verified [standalone repository](https://github.com/Omni-NexusAI/browser_session_sync) |
-| [`provider_profiles`](plugins/provider_profiles/) | Agent Zero, Agentspine | Active |
+| [`provider_profiles`](plugins/provider_profiles/) | Agent Zero | Active |
 | [`_enhanced_speech`](plugins/_enhanced_speech/) | Agent Zero, Agentspine | Active; voice compatibility changes are under review |
 | [`ai_link_bridge`](plugins/ai_link_bridge/) | Agent Zero, Agentspine target | Development scaffold; task dispatch is not implemented |
 | Convo | Multiple frameworks planned | Planned; no package yet |

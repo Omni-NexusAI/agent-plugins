@@ -1,16 +1,38 @@
-<div>
-  <p class="hint">Provider history is stored locally in the browser. Existing history is not altered when these settings change.</p>
-  <label>History storage key
-    <input type="text" x-model="config.history_storage_key">
-  </label>
-  <label>LM Studio API base
-    <input type="url" x-model="config.local_provider_defaults.lm_studio">
-  </label>
-  <label>Ollama API base
-    <input type="url" x-model="config.local_provider_defaults.ollama">
-  </label>
-  <label class="checkbox-label">
-    <input type="checkbox" x-model="config.clear_stale_model_on_new_provider">
-    Clear a stale model when a provider has no saved profile
-  </label>
+<div x-data>
+  <template x-if="config && config.local_provider_defaults">
+    <div>
+      <p class="hint">Favorites are stored on the server (<code>favorites.json</code> beside this plugin) and are shared by every browser. Provider memory is stored in the plugin profile store.</p>
+
+      <!-- New keys use :value/@change so opening this page never modifies the config (no false "unsaved changes"). -->
+      <label>Favorites in the model search
+        <select :value="config.favorites_ui ?? 'auto'" @change="config.favorites_ui = $event.target.value">
+          <option value="auto">Auto (off if Agent Zero ships its own favorites)</option>
+          <option value="on">On</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <label>Favorites pinned above the results
+        <input type="number" min="1" max="20" step="1" :value="config.favorites_shown ?? 5"
+               @input="config.favorites_shown = Number($event.target.value) || 5">
+      </label>
+      <label>Normal results
+        <select :value="config.normal_results_mode ?? 'narrow'" @change="config.normal_results_mode = $event.target.value">
+          <option value="narrow">Show all models when a field is opened; typing narrows them</option>
+          <option value="core">Exactly like Agent Zero (only near-matches of the field text)</option>
+        </select>
+      </label>
+
+      <label>LM Studio API base
+        <input type="url" x-model="config.local_provider_defaults.lm_studio">
+      </label>
+      <label>Ollama API base
+        <input type="url" x-model="config.local_provider_defaults.ollama">
+      </label>
+      <label class="checkbox-label">
+        <input type="checkbox" :checked="config.clear_stale_model_on_new_provider ?? true"
+               @change="config.clear_stale_model_on_new_provider = $event.target.checked">
+        Clear a stale model when a provider has no saved profile
+      </label>
+    </div>
+  </template>
 </div>

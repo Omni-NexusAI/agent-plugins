@@ -1,0 +1,25 @@
+<script>
+  (() => {
+    const VERSION = "1.1.0";
+    // Plugin base path from this component's own location; the fixed path is the fallback.
+    let base = "/plugins/provider_profiles";
+    try {
+      const path = document.currentScript?.closest?.("x-component")?.getAttribute("path") || "";
+      const match = path.match(/^(.*\/plugins\/[^/]+)\/extensions\//);
+      if (match) base = match[1];
+    } catch { /* keep fallback */ }
+
+    if (!document.querySelector('link[data-pp-favorites-css]')) {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = `${base}/webui/favorites.css?v=${VERSION}`;
+      link.dataset.ppFavoritesCss = "1";
+      document.head.appendChild(link);
+    }
+    const v = `?v=${VERSION}`;
+    const load = (name) => import(`${base}/webui/${name}.js${v}`);
+    Promise.all([load("favorites-ui"), load("favorites-core"), load("favorites-api"), load("store-patch")])
+      .then(([ui, core, api, patch]) => ui.install({ core, api, installStorePatch: patch.installStorePatch }))
+      .catch((error) => console.warn("Provider Profiles: favorites unavailable", error));
+  })();
+</script>
