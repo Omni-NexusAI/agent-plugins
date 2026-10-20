@@ -1,0 +1,35 @@
+{
+  "version": "v2.11",
+  "source": "https://github.com/agent0ai/agent-zero",
+  "commit": "6a6cecff8527b164668c7a6ab2f76b6b1ed7cfa1",
+  "files": {
+    "plugins/_model_config/webui/model-field.html": {
+      "sha256": "e4dc378260202749f405e659e539df9bf0c7a5fd28d254e054739603a1713c79",
+      "bytes": 18075
+    },
+    "plugins/_model_config/webui/model-config-store.js": {
+      "sha256": "244f33622e3901a954f0c0975b2108d4509034e95de767b359da812a15b36c31",
+      "bytes": 32461
+    },
+    "plugins/_model_config/webui/api-keys-mixin.js": {
+      "sha256": "c832f922fdfa2858fb1c1b850179edd60221e58331f115f37f8f7959841b4724",
+      "bytes": 6054
+    },
+    "plugins/_model_config/webui/switcher-mixin.js": {
+      "sha256": "7b1e555e2e93f8c2398bb2f45961bb8c74b4d139b058590000fe0e0f9751c8cc",
+      "bytes": 10471
+    },
+    "plugins/_model_config/api/model_search.py": {
+      "sha256": "3c7922bd8179191b6a91ff06a97d1949bd83dad3f5d29a1b2142f32393d0a67e",
+      "bytes": 10270
+    },
+    "conf/model_providers.yaml": {
+      "sha256": "2e4c8f16d424a866f13bf2df6e5fcc906ffe8064e333b16f31af2d43355f8a94",
+      "bytes": 9472
+    },
+    "webui/vendor/alpine/alpine.min.js": {
+      "sha256": "691a1e0a9bacc47a859577fb996d992afcefa588a7c61bebbf38c224bf57d43a",
+      "bytes": 44770
+    }
+  }
+}

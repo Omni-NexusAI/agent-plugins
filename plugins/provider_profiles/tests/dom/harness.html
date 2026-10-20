@@ -1,0 +1,164 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Provider Profiles DOM harness</title>
+<style>
+  body { font: 14px sans-serif; background: #1b1b1b; color: #ddd; padding: 16px; width: 520px; }
+  .field { margin: 8px 0; }
+  .field-control { position: relative; }
+  input[type=text], select { width: 100%; box-sizing: border-box; padding: 4px; }
+  .model-search-btn { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); }
+  .model-search-results { position: absolute; top: calc(100% + 4px); left: 0; right: 0; max-height: 200px; overflow-y: auto; background: #2a2a2a; border: 1px solid #555; z-index: 50; padding: 4px; }
+  .model-search-item { padding: 4px 8px; cursor: pointer; position: relative; }
+  .model-search-item.matched { font-weight: 600; }
+  .model-search-item.disabled { opacity: .5; cursor: default; }
+  .model-search-separator { height: 1px; background: #555; margin: 4px 0; }
+</style>
+<script>
+  window.__toasts = [];
+  window.__errors = [];
+  window.justToast = (message, type) => window.__toasts.push({ message, type });
+  window.toastFrontendError = (message, title) => window.__toasts.push({ message, type: "error", title });
+  addEventListener("error", (e) => window.__errors.push(String(e.message)));
+  addEventListener("unhandledrejection", (e) => window.__errors.push("unhandled: " + String(e.reason)));
+  const _consoleError = console.error;
+  console.error = (...args) => { window.__errors.push("console.error: " + args.map(String).join(" ")); _consoleError.apply(console, args); };
+
+  // Minimal stand-in for Agent Zero's <x-component>: fetch HTML, run head/body scripts, append.
+  const componentCache = new Map();
+  customElements.define("x-component", class extends HTMLElement {
+    async connectedCallback() {
+      const path = this.getAttribute("path");
+      if (!componentCache.has(path)) componentCache.set(path, fetch(path).then((r) => r.text()));
+      const html = await componentCache.get(path);
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      const adopt = (node) => {
+        if (node.tagName === "SCRIPT") {
+          const script = document.createElement("script");
+          for (const attr of node.attributes) script.setAttribute(attr.name, attr.value);
+          script.textContent = node.textContent;
+          return script;
+        }
+        return document.importNode(node, true);
+      };
+      for (const node of [...doc.head.childNodes, ...doc.body.childNodes]) {
+        if (node.nodeType !== 1) continue;
+        this.appendChild(adopt(node));
+      }
+    }
+  });
+</script>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+  const params = new URLSearchParams(location.search);
+  const HOST = params.get("host") || "v2.14";
+  const exts = (params.get("ext") || "").split(",").filter(Boolean);
+  const order = params.get("order") || "ext-first";
+  const extDir = "/plugins/provider_profiles/extensions/webui/page-head/";
+
+  const loadExtensions = () => {
+    for (const name of exts) {
+      const el = document.createElement("x-component");
+      el.setAttribute("path", extDir + name);
+      document.head.appendChild(el);
+    }
+  };
+  const loadAlpine = () => new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "/vendor/alpine.min.js";
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+
+  const slot = (provider, name, extra = {}) => ({ provider, name, api_base: "", kwargs: {}, _kwargs_text: "", ctx_length: 128000, ...extra });
+  const mkPreset = (title) => ({
+    name: title,
+    chat: slot("openrouter", "deepseek/deepseek-v4", { vision: true, ctx_history: 0.7 }),
+    vision: slot("", "", { override_main: false }),
+    utility: slot("", "", { ctx_input: 0.7 }),
+    embedding: slot("huggingface", "sentence-transformers/all-MiniLM-L6-v2"),
+  });
+
+  if (order === "ext-first") loadExtensions();
+  const storeModule = await import("/plugins/_model_config/webui/model-config-store.js");
+  if (order === "store-first") loadExtensions();
+  // Providers must exist before Alpine evaluates the slot scopes (the real app loads them via ensureLoaded()).
+  storeModule.store.chatProviders = [
+    { value: "openrouter", label: "OpenRouter" },
+    { value: "lm_studio", label: "LM Studio" },
+    { value: "ollama", label: "Ollama" },
+    { value: "llama_cpp", label: "llama.cpp" },
+    { value: "other", label: "Other OpenAI compatible" },
+  ];
+  storeModule.store.embeddingProviders = [
+    { value: "huggingface", label: "HuggingFace" },
+    { value: "lm_studio", label: "LM Studio" },
+    { value: "other", label: "Other OpenAI compatible" },
+  ];
+
+  document.addEventListener("alpine:init", () => {
+    Alpine.data("presetEditor", () => ({
+      host: HOST,
+      presets: [mkPreset("Default"), mkPreset("Second")],
+      selectedKey: 0,
+      get selectedPreset() { return this.presets[this.selectedKey]; },
+      selectPreset(i) { this.selectedKey = i; },
+      save() {
+        // v2.14 savePresets() rebuilds kwargs from the textarea text; v2.11 does not.
+        if (this.host === "v2.14") {
+          for (const preset of this.presets) {
+            for (const key of ["chat", "vision", "utility", "embedding"]) {
+              const s = preset[key];
+              if (typeof s?._kwargs_text !== "string") continue;
+              s.kwargs = Alpine.store("modelConfig").textToKwargs(s._kwargs_text);
+            }
+          }
+        }
+        window.__saved = JSON.parse(JSON.stringify(this.presets));
+        return true;
+      },
+    }));
+  });
+
+  document.getElementById("app").innerHTML = `
+  <div id="editor" x-data="presetEditor">
+    <select id="preset-switch" @change="selectPreset(Number($el.value))">
+      <option value="0">Default</option><option value="1">Second</option>
+    </select>
+    <template x-if="selectedPreset"><div>
+      <section id="slot-chat">
+        <div x-data="{ get model() { return selectedPreset.chat; }, get visionModel() { return selectedPreset.vision; }, modelType: 'chat', providers: $store.modelConfig.chatProviders, searchType: 'chat', apiKeyMode: 'none' }">
+          <x-component path="/plugins/_model_config/webui/model-field.html"></x-component>
+        </div>
+      </section>
+      <template x-if="!selectedPreset.chat.vision || selectedPreset.vision.override_main">
+        <section id="slot-vision">
+          <div x-data="{ get model() { return selectedPreset.vision; }, modelType: 'vision', providers: $store.modelConfig.chatProviders, searchType: 'chat', apiKeyMode: 'none' }">
+            <x-component path="/plugins/_model_config/webui/model-field.html"></x-component>
+          </div>
+        </section>
+      </template>
+      <section id="slot-utility">
+        <div x-data="{ get model() { return selectedPreset.utility; }, modelType: 'utility', providers: $store.modelConfig.chatProviders, searchType: 'chat', apiKeyMode: 'none', get providerFallback() { return selectedPreset.chat.provider; }, get apiBaseFallback() { return selectedPreset.chat.api_base; } }">
+          <x-component path="/plugins/_model_config/webui/model-field.html"></x-component>
+        </div>
+      </section>
+      <section id="slot-embedding">
+        <div x-data="{ get model() { return selectedPreset.embedding; }, modelType: 'embedding', providers: $store.modelConfig.embeddingProviders, searchType: 'embedding', apiKeyMode: 'none' }">
+          <x-component path="/plugins/_model_config/webui/model-field.html"></x-component>
+        </div>
+      </section>
+    </div></template>
+    <button id="btn-save" @click="save()">Save</button>
+  </div>`;
+
+  await loadAlpine();
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  window.__ready = true;
+</script>
+</body>
+</html>
