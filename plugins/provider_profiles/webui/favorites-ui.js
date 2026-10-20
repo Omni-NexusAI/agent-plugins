@@ -8,9 +8,12 @@
 //   * debounced type-ahead through the field scope's own doSearch()
 // Every step is guarded: on any failure the host dropdown keeps working unchanged.
 
-import * as core from "./favorites-core.js";
-import * as api from "./favorites-api.js";
-import { installStorePatch } from "./store-patch.js";
+// The loader cache-busts this entry with ?v=<version>; siblings get the same query so a plugin upgrade
+// can never pair a new entry with a stale cached module.
+const V = new URL(import.meta.url).search;
+const core = await import(`./favorites-core.js${V}`);
+const api = await import(`./favorites-api.js${V}`);
+const { installStorePatch } = await import(`./store-patch.js${V}`);
 
 const VERSION = "1.1.0";
 const GLOBAL = "__providerProfilesFavorites";
@@ -70,6 +73,7 @@ export async function install() {
   const observers = [];
   let storePatch = null;
   let store = null;
+  let yielded = false;
   let queue = Promise.resolve();
 
   const setTypes = (types, rev) => {
@@ -83,6 +87,7 @@ export async function install() {
     version: VERSION,
     disposed: false,
     state,
+    fieldCount: () => fields.size,
     dispose() {
       instance.disposed = true;
       controller.abort();
@@ -97,11 +102,13 @@ export async function install() {
 
   // ------------------------------------------------------------------ store
   const ensureStore = () => {
+    if (yielded) return null;
     if (store) return store;
     const found = globalThis.Alpine?.store?.("modelConfig");
     if (!found) return null;
     if (state.settings.favorites_ui !== "on" && core.detectHostFavorites(Object.keys(found))) {
       console.info("Provider Profiles: host provides its own model favorites; favorites UI disabled.");
+      yielded = true;
       instance.dispose();
       return null;
     }
@@ -117,7 +124,12 @@ export async function install() {
     return next;
   };
 
-  const paintAll = () => { for (const field of fields) field.refresh(); };
+  // Fields whose input left the DOM (closed modal, rebuilt slot) must not linger: drop their listeners too.
+  const prune = () => { for (const field of [...fields]) if (!field.isConnected()) field.dispose(); };
+  const paintAll = () => {
+    prune();
+    for (const field of fields) field.refresh();
+  };
 
   function applyOp(op) {
     const previous = { types: state.types, rev: state.rev };
@@ -128,8 +140,11 @@ export async function install() {
       if (result.ok) {
         setTypes(result.types, result.rev);
       } else {
-        setTypes(previous.types, previous.rev);
         if (op.kind === "set") toast(result.message || "Could not update favorites");
+        // Reload the server's truth instead of rolling back to a snapshot that predates other queued ops.
+        const fresh = await api.bootstrap();
+        if (fresh.ok) setTypes(fresh.types, fresh.rev);
+        else setTypes(previous.types, previous.rev);
       }
       paintAll();
       return result;
@@ -418,6 +433,7 @@ export async function install() {
     } catch { /* events keep the star current */ }
 
     const field = {
+      isConnected: () => input.isConnected,
       refresh() {
         paintInputStar();
         decorateRows();
@@ -443,6 +459,7 @@ export async function install() {
   }
 
   async function attach(input) {
+    prune();
     if (attached.has(input) || instance.disposed) return;
     const fc = input.parentElement;
     if (!fc?.classList.contains("field-control")) return;

@@ -105,6 +105,17 @@ class HookMixin:
         self.assertEqual(page.evaluate("typeof Alpine.store('modelConfig').onProviderProfileChanged"), "undefined")
         self.assertEqual(self.errors(), [])
 
+    def test_settings_are_honored(self):
+        page = self.open_harness(ext=HOOK, favorites={"clear_stale_model_on_new_provider": False,
+                                                       "local_provider_defaults": {"ollama": "http://custom-host:11434"}})
+        page.wait_for_function(f"document.querySelector(\"{CHAT_SELECT}\")?.__providerProfilesWired === true", timeout=10000)
+        page.evaluate("async () => { await __providerProfiles.ready; }")
+        page.evaluate(f"() => {{ {GET_CHAT}.name = 'my-model'; }}")
+        self.choose(page, CHAT_SELECT, "ollama")
+        page.wait_for_function(f"() => {GET_CHAT}.provider === 'ollama'")
+        self.assertEqual(self.chat(page, ".api_base"), "http://custom-host:11434")
+        self.assertEqual(self.chat(page, ".name"), "my-model", "clear_stale_model_on_new_provider=false keeps the name")
+
     def test_store_before_extension_order(self):
         page = self.open_hooked(order="store-first")
         self.assertTrue(page.evaluate("Alpine.store('modelConfig').__providerProfilesPatched"))

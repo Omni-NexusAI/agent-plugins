@@ -19,8 +19,14 @@ export function canonicalBase(apiBase) {
   }
   if ((url.protocol !== "http:" && url.protocol !== "https:") || !url.hostname) return null;
   if (url.username || url.password) return null;
-  let path = url.pathname.replace(/\/+$/, "");
-  if (/\/v1$/i.test(path)) path = path.slice(0, -3).replace(/\/+$/, "");
+  const segments = [];
+  for (const segment of url.pathname.split("/")) { // resolve dot/empty segments exactly like the Python mirror
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") { segments.pop(); continue; }
+    segments.push(segment);
+  }
+  if (segments.length && segments[segments.length - 1].toLowerCase() === "v1") segments.pop();
+  const path = segments.length ? `/${segments.join("/")}` : "";
   return `${url.protocol}//${url.host}${path}`;
 }
 

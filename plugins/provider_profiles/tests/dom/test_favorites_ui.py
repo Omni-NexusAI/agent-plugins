@@ -205,6 +205,31 @@ class FavoritesUiMixin:
         page.wait_for_function(f"() => ({EDITOR}).presets[1].chat.name === 'meta/llama-3'")
         self.assertEqual(page.evaluate(f"() => ({EDITOR}).presets[0].chat.name"), "deepseek/deepseek-v4")
 
+    def test_favorites_shown_setting_controls_the_card_size(self):
+        entries = [("chat", "openrouter", "", f"m{i}") for i in range(4)]
+        page = self.open_fav(favorites={"favorites_shown": 2}, entries=entries)
+        page.click(CHAT_INPUT)
+        page.wait_for_selector(CHAT_CARD)
+        self.assertEqual(self.card_names(), ["m3", "m2"])
+        self.assertEqual(page.locator("#slot-chat .pp-card-more").inner_text(), "Show all 4")
+
+    def test_detached_fields_are_pruned(self):
+        page = self.open_fav()
+        self.assertEqual(page.evaluate("window.__providerProfilesFavorites.fieldCount()"), 3)
+        page.evaluate("() => { document.querySelector('#slot-utility').remove(); document.querySelector('#slot-embedding').remove(); }")
+        page.fill(CHAT_INPUT, "my-custom-model")
+        page.click("#slot-chat .pp-star-input")
+        page.wait_for_function("window.__providerProfilesFavorites.fieldCount() === 1", timeout=5000)
+
+    def test_failed_write_reloads_the_servers_truth(self):
+        page = self.open_fav(entries=[("chat", "openrouter", "", "keep-1")])
+        page.fill(CHAT_INPUT, "will-fail")
+        self.server.state.favorites_store.max_per_type = 1  # the next star is refused by the server
+        page.click("#slot-chat .pp-star-input")
+        page.wait_for_function("window.__toasts.length > 0", timeout=5000)
+        page.wait_for_function("!document.querySelector('#slot-chat .pp-star-input').classList.contains('pp-star-on')")
+        self.assertEqual(self.stored(), [("openrouter", "", "keep-1")])
+
     def test_card_rows_work_from_the_keyboard(self):
         page = self.open_fav(entries=[("chat", "openrouter", "", "meta/llama-3")])
         page.click(CHAT_INPUT)

@@ -10,7 +10,7 @@
 //     otherwise it keeps the host's match-first split.
 // normal_results_mode = "core": nothing is changed.
 
-import { groupForTyping } from "./favorites-core.js";
+const { groupForTyping } = await import(`./favorites-core.js${new URL(import.meta.url).search}`);
 
 const CACHE_TTL_MS = 6000;
 const SEP = "\u001f";

@@ -11,7 +11,12 @@
     ["http://[::1]:8080/V1", "http://[::1]:8080"],
     ["http://10.0.0.5:8080/v1/v1", "http://10.0.0.5:8080/v1"],
     ["https://openrouter.ai/api/v1", "https://openrouter.ai/api"],
-    ["  http://100.64.0.9:8096/v1  ", "http://100.64.0.9:8096"]
+    ["  http://100.64.0.9:8096/v1  ", "http://100.64.0.9:8096"],
+    ["http://über.local/v1", "http://xn--ber-goa.local"],
+    ["http://h/a/../b/v1", "http://h/b"],
+    ["http://h//a///b/", "http://h/a/b"],
+    ["http://h/./v1/", "http://h"],
+    ["http://h/v1/api", "http://h/v1/api"]
   ],
   "invalid_base": [
     ["ftp://host/v1", "invalid_api_base"],

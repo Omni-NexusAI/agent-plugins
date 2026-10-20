@@ -73,10 +73,24 @@ def canonical_base(api_base: Any) -> str:
     host = host.lower()
     if ":" in host:
         host = f"[{host}]"
+    else:
+        try:
+            host = host.encode("idna").decode("ascii")  # same punycode form the browser's URL class produces
+        except UnicodeError as error:
+            raise FavoritesError("invalid_api_base", "API base host is not valid") from error
     netloc = host if port is None or port == _DEFAULT_PORTS[parts.scheme] else f"{host}:{port}"
-    path = parts.path.rstrip("/")
-    if path.lower().endswith("/v1"):
-        path = path[:-3].rstrip("/")
+    segments: list[str] = []
+    for segment in parts.path.split("/"):  # resolve dot segments and empty segments like the JS mirror
+        if segment in ("", "."):
+            continue
+        if segment == "..":
+            if segments:
+                segments.pop()
+            continue
+        segments.append(segment)
+    if segments and segments[-1].lower() == "v1":
+        segments.pop()
+    path = "/" + "/".join(segments) if segments else ""
     return f"{parts.scheme}://{netloc}{path}"
 
 
@@ -172,6 +186,14 @@ class FavoritesStore:
         self.lock_stale = lock_stale
 
     # -- locking
+    def _lock_identity(self) -> tuple[int, int, float] | None:
+        """(inode, mtime_ns, mtime) of the lock file via stat only (never open it: on Windows a reader blocks the owner's unlink)."""
+        try:
+            info = self.lock_path.stat()
+        except OSError:
+            return None
+        return info.st_ino, info.st_mtime_ns, info.st_mtime
+
     @contextlib.contextmanager
     def _locked(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -179,48 +201,72 @@ class FavoritesStore:
         while True:
             try:
                 fd = os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                info = os.fstat(fd)
                 os.close(fd)
+                mine = (info.st_ino, info.st_mtime_ns)
                 break
-            except FileExistsError:
-                try:
-                    age = time.time() - self.lock_path.stat().st_mtime
-                    if age > self.lock_stale:
-                        self.lock_path.unlink()
-                        continue
-                except FileNotFoundError:
+            except (FileExistsError, PermissionError):
+                # PermissionError: on Windows a lock whose deletion is still pending cannot be re-created yet.
+                seen = self._lock_identity()
+                if seen is None:
+                    if time.monotonic() >= deadline:
+                        raise FavoritesError("busy", "favorites file is locked by another request")
+                    time.sleep(0.002)
                     continue
-                except OSError:
-                    pass
+                if time.time() - seen[2] > self.lock_stale:
+                    again = self._lock_identity()
+                    if again is not None and again[:2] == seen[:2]:
+                        # Remove only the very lock judged stale (re-checked just before), never a fresh one.
+                        self._remove_lock()
+                    continue
                 if time.monotonic() >= deadline:
                     raise FavoritesError("busy", "favorites file is locked by another request")
-                time.sleep(0.01)
+                time.sleep(0.005)
         try:
             yield
         finally:
-            with contextlib.suppress(OSError):
+            current = self._lock_identity()
+            if current is not None and current[:2] == mine:  # never delete a lock someone else took over
+                self._remove_lock()
+
+    def _remove_lock(self) -> None:
+        for _ in range(20):  # Windows can briefly refuse to delete a file another thread just stat-ed
+            try:
                 self.lock_path.unlink()
+                return
+            except FileNotFoundError:
+                return
+            except OSError:
+                time.sleep(0.005)
 
     # -- file io
-    def _load_file(self, path: Path) -> dict[str, Any] | None:
+    def _load_file(self, path: Path) -> tuple[str, dict[str, Any] | None]:
+        """Return ("ok", data), ("missing", None) or ("invalid", None). Transient OS errors are retried and then
+        raised: they must never be mistaken for corruption (Windows refuses reads while a replace is in flight)."""
+        for attempt in range(40):
+            try:
+                raw = path.read_text(encoding="utf-8")
+                break
+            except FileNotFoundError:
+                return "missing", None
+            except OSError:
+                if attempt == 39:
+                    raise
+                time.sleep(0.005)
         try:
-            raw = path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return None
-        except OSError:
-            return None
-        try:
-            return _sanitize(json.loads(raw))
+            data = _sanitize(json.loads(raw))
         except ValueError:
-            return None
+            return "invalid", None
+        return ("ok", data) if data is not None else ("invalid", None)
 
     def _read(self) -> dict[str, Any]:
-        if not self.path.exists():
-            return self._load_file(self.bak_path) or _empty()
-        data = self._load_file(self.path)
-        if data is not None:
+        status, data = self._load_file(self.path)
+        if status == "ok":
             return data
-        self._quarantine()
-        return self._load_file(self.bak_path) or _empty()
+        if status == "invalid":
+            self._quarantine()
+        backup_status, backup = self._load_file(self.bak_path)
+        return backup if backup_status == "ok" else _empty()
 
     def _quarantine(self) -> None:
         target = self.path.with_name(f"{self.path.name}.corrupt-{int(self.clock())}")
@@ -241,7 +287,14 @@ class FavoritesStore:
             if self.path.exists():
                 with contextlib.suppress(OSError):
                     self.bak_path.write_bytes(self.path.read_bytes())  # previous good version
-            os.replace(tmp, self.path)
+            for attempt in range(40):  # Windows: replace fails while another thread is reading the file
+                try:
+                    os.replace(tmp, self.path)
+                    break
+                except PermissionError:
+                    if attempt == 39:
+                        raise
+                    time.sleep(0.005)
         finally:
             with contextlib.suppress(OSError):
                 tmp.unlink()

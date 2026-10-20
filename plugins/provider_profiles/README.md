@@ -40,8 +40,8 @@ slots).
 
 | Host | Status |
 |---|---|
-| Agent Zero **v2.14** (latest at release time) | supported, tested |
-| Agent Zero **v2.11** | supported (compatibility floor), tested |
+| Agent Zero **v2.14** (latest at release time) | supported; verified in an offline harness on the pinned v2.14 source, not yet on a live instance |
+| Agent Zero **v2.11** | supported (compatibility floor); same offline verification on the pinned v2.11 source |
 | Agentspine | **not supported** (it ships its own `_provider_profiles`; its startup sanitizer archives this plugin) |
 
 - Plugin-only and additive: no host file is edited, nothing is shipped through
