@@ -1,6 +1,6 @@
 name: provider_profiles
 title: Provider Profiles
-description: Model favorites (stars and an instant favorites card in the model-name search), plus per-provider model memory and local-provider API base defaults (LM Studio, Ollama) for Agent Zero.
-version: 1.1.0
+description: Model favorites (stars and an instant favorites card in the model-name search), local endpoint model discovery (llama.cpp routers and their aliases, LM Studio, Ollama and other OpenAI-compatible servers, with state and context), plus per-provider model memory and local-provider API base defaults for Agent Zero.
+version: 1.2.0
 settings_sections:
   - agent

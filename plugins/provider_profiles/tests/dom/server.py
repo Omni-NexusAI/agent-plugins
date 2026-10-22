@@ -2,10 +2,14 @@
 
 Serves the harness page, the pinned upstream Agent Zero fixtures (per host
 version), the plugin's own WebUI files and a fake backend (model search,
-/plugins config, favorites). Every request is logged for assertions.
+/plugins config, favorites, discover_models). Every request is logged for
+assertions. Discovery is backed by the real endpoint_discovery.handle (the code
+the API handler runs) and the host search can be backed by the pinned upstream
+model_search.py; both then talk to real fake endpoint servers over sockets.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -34,6 +38,11 @@ DEFAULT_MODELS = {
 }
 
 
+# The pinned upstream search is run under sys.modules stubs (tests/core_search_host.py): never concurrently with itself
+# or with discovery, which would otherwise import while the stubs are in place.
+CORE_LOCK = threading.Lock()
+
+
 class HarnessState:
     def __init__(self, host: str):
         self.host = host
@@ -42,11 +51,48 @@ class HarnessState:
         self.official_query_filter = True  # emulate model_search.py filtering by query
         self.search_mode = "ok"  # ok | hang | http500
         self.search_delay = 0.0
+        self.search_source = "provider_endpoint"
+        self.search_error = ""
+        self.search_backend = None  # callable(dict) -> dict; replaces the canned list (e.g. the pinned upstream search)
         self.release = threading.Event()
         self.configs: dict[str, dict] = {}
         self.favorites_service = None  # callable(dict) -> dict
         self.favorites_status = 200
+        self.discovery_service = None  # callable(dict) -> dict
+        self.discovery_status = 200
+        self.discovery_mode = "ok"  # ok | hang
+        self.discovery_delay = 0.0
+        self.blocked_static: set[str] = set()  # file names answered with 404 (e.g. an optional module that failed to load)
         self.lock = threading.Lock()
+
+    def enable_discovery(self, *, settings=None, provider_configs=None, keys=None):
+        """Back /discover_models with the real endpoint_discovery.handle (same code the API handler runs)."""
+        from ..loader import load_helper
+
+        module = load_helper("endpoint_discovery")
+        configs = provider_configs or {}
+        merged = {"discovery_enabled": True, **(settings or {})}
+        self.discovery_module = module
+
+        def service(body):
+            with CORE_LOCK:
+                return asyncio.run(module.handle(body, settings=merged, provider_config=lambda model_type, provider: configs.get(provider),
+                                                 stored_key=lambda provider: (keys or {}).get(provider)))
+
+        self.discovery_service = service
+
+    def enable_core_search(self, **kw):
+        """Back /model_search with the pinned upstream model_search.py of this host version."""
+        from ..core_search_host import CoreSearch
+
+        core = CoreSearch(self.host, **kw)
+
+        def backend(body):
+            with CORE_LOCK:
+                return core.run(str(body.get("provider") or ""), str(body.get("api_base") or ""), str(body.get("query") or ""),
+                                str(body.get("model_type") or "chat"))
+
+        self.search_backend = backend
 
     def enable_favorites(self, directory, overrides=None):
         """Back /favorites with the real FavoritesStore + handle() (same code the API handler runs)."""
@@ -121,6 +167,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         self.state.requests.append({"method": "GET", "path": path, "body": None})
         target = self._resolve_static(path)
+        if target is not None and target.name in self.state.blocked_static:
+            target = None
         data = _read_bytes(target) if target else None
         if data is None:
             self._send(404, b"not found", "text/plain")
@@ -141,6 +189,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/plugins/_model_config/model_search":
             return self._model_search(body)
+        if path == "/api/plugins/provider_profiles/discover_models":
+            return self._discover(body)
         if path == "/api/plugins":
             return self._plugins(body)
         if path == "/api/plugins/provider_profiles/favorites":
@@ -159,12 +209,29 @@ class Handler(BaseHTTPRequestHandler):
             state.release.wait(timeout=30)
         if state.search_mode == "http500":
             return self._send(500, b"boom", "text/plain")
+        if state.search_backend is not None:
+            return self._json(200, state.search_backend(body))
         provider = str(body.get("provider") or "")
         query = str(body.get("query") or "").strip().lower()
         models = list(state.models.get(provider, []))
         if state.official_query_filter and query:
             models = [m for m in models if query in m.lower()]
-        self._json(200, {"models": sorted(models, key=str.lower), "provider": provider, "source": "provider_endpoint", "error": ""})
+        self._json(200, {"models": sorted(models, key=str.lower), "provider": provider, "source": state.search_source, "error": state.search_error})
+
+    def _discover(self, body: dict):
+        state = self.state
+        if state.discovery_delay:
+            threading.Event().wait(state.discovery_delay)
+        if state.discovery_mode == "hang":
+            state.release.wait(timeout=30)
+        if state.discovery_status != 200:
+            return self._send(state.discovery_status, b"discovery unavailable", "text/plain")
+        if state.discovery_service is None:
+            return self._send(404, b"no discovery service", "text/plain")
+        try:
+            self._json(200, state.discovery_service(body))
+        except Exception as error:  # noqa: BLE001 - surfaced to the test through the 500
+            self._send(500, repr(error).encode(), "text/plain")
 
     def _plugins(self, body: dict):
         state = self.state

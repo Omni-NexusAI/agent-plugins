@@ -1,6 +1,6 @@
 <script>
   (() => {
-    const VERSION = "1.1.0";
+    const VERSION = "1.2.0";
     // Plugin base path from this component's own location; the fixed path is the fallback.
     let base = "/plugins/provider_profiles";
     try {
@@ -18,8 +18,14 @@
     }
     const v = `?v=${VERSION}`;
     const load = (name) => import(`${base}/webui/${name}.js${v}`);
-    Promise.all([load("favorites-ui"), load("favorites-core"), load("favorites-api"), load("store-patch")])
-      .then(([ui, core, api, patch]) => ui.install({ core, api, installStorePatch: patch.installStorePatch }))
-      .catch((error) => console.warn("Provider Profiles: favorites unavailable", error));
+    // Discovery is optional: if any of its modules fails to load, favorites still install without it.
+    const optional = Promise.allSettled([load("discovery-ui"), load("discovery-merge"), load("discovery-api")]);
+    Promise.all([load("favorites-ui"), load("favorites-core"), load("favorites-api"), load("store-patch"), optional])
+      .then(([ui, core, api, patch, loaded]) => {
+        const [discoveryUi, merge, discoveryApi] = loaded.map((result) => (result.status === "fulfilled" ? result.value : null));
+        const discovery = discoveryUi && merge && discoveryApi ? { ui: discoveryUi, merge, api: discoveryApi } : null;
+        return ui.install({ core, api, installStorePatch: patch.installStorePatch, discovery });
+      })
+      .catch((error) => console.warn("Provider Profiles: model field enhancements unavailable", error));
   })();
 </script>

@@ -33,8 +33,9 @@ browser package beyond the historical container snapshots below.
 - `_agentspine_identity` and `_multi_source_updater` are Spine-only sources.
   Identity remains inert unless the explicit Spine 9.9 environment gate is
   present; neither package is an A0 custom deployment.
-- Provider Profiles 1.1.0 is no longer a byte-for-byte mirror of the Spine
-  `_provider_profiles` overlay: it adds model favorites and the Agent Zero v2.14
+- Provider Profiles 1.2.0 is no longer a byte-for-byte mirror of the Spine
+  `_provider_profiles` overlay: it adds model favorites, local endpoint model
+  discovery and the Agent Zero v2.14
   `_kwargs_text` fix, targets official Agent Zero v2.11/v2.14, and is not an
   Agentspine target (the Spine 9.9 startup sanitizer archives it). It keeps its
   A0-specific default configuration, settings UI and the canonical blue-server

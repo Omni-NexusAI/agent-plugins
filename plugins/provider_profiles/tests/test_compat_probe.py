@@ -8,7 +8,7 @@ from .compat import check_upstream as probe
 from .loader import PLUGIN_DIR
 
 FIXTURES = PLUGIN_DIR / "tests" / "fixtures"
-PATHS = (probe.FIELD, probe.STORE, probe.SEARCH, probe.ALPINE)
+PATHS = probe.FILES
 
 
 def load(version: str) -> dict[str, str]:
@@ -33,6 +33,23 @@ class ProbeOnPinnedHosts(unittest.TestCase):
         files[probe.STORE] = files[probe.STORE].replace("async searchModelsDetailed(", "async searchModelsRenamed(")
         statuses = {name: status for status, name, _ in probe.evaluate(files)}
         self.assertEqual(statuses["searchModelsDetailed"], "FAIL")
+
+    def test_discovery_dependencies_are_checked(self):
+        rows = {name: (status, detail) for status, name, detail in probe.evaluate(load("v2.14"))}
+        self.assertEqual(rows["get_api_key_raw"][0], "PASS")
+        self.assertIn("present", rows["get_api_key_raw"][1])
+        self.assertIn("absent", {name: detail for _s, name, detail in probe.evaluate(load("v2.11"))}["get_api_key_raw"], "v2.11 has no raw reader: the fallback is used")
+        files = load("v2.14")
+        files[probe.MODELS] = files[probe.MODELS].replace("def get_api_key(", "def get_key(")
+        files[probe.PROVIDERS] = files[probe.PROVIDERS].replace("def get_provider_config(", "def provider_config(")
+        files[probe.STORE] = files[probe.STORE].replace("models: data.models || [],", "list: data.models || [],")
+        statuses = {name: status for status, name, _ in probe.evaluate(files)}
+        self.assertEqual(statuses["get_api_key"], "FAIL")
+        self.assertEqual(statuses["get_provider_config"], "FAIL")
+        self.assertEqual(statuses["search result carries models"], "FAIL")
+        files = load("v2.14")
+        files[probe.MODELS] = files[probe.MODELS].replace('f"{service.upper()}_API_TOKEN"', 'f"{service.upper()}_TOKEN"')
+        self.assertEqual({name: status for status, name, _ in probe.evaluate(files)}["stored key lookups"], "WARN")
 
     def test_native_favorites_in_the_host_warn(self):
         files = load("v2.14")

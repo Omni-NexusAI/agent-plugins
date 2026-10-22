@@ -1,11 +1,14 @@
-// Model favorites UI for Agent Zero's model-name fields (additive DOM; nothing of the host is replaced).
+// Model favorites and local endpoint discovery UI for Agent Zero's model-name fields (additive DOM; nothing of
+// the host is replaced).
 //
-// Per `input[x-model="model.name"]` field this adds:
+// Per `input[x-model="model.name"]` field this adds, when favorites are on:
 //   * a star beside the input for the current value (covers manually typed names)
 //   * a star on every host result row
 //   * a plugin-owned favorites card that opens instantly (click / typing / search / Enter) and sits
 //     flush above the host's results box
 //   * debounced type-ahead through the field scope's own doSearch()
+// and, when discovery is on (webui/discovery-ui.js): state/context chips on the host's rows, a reason line and
+// an opt-in fill of the context length / vision flag. The two features are independent.
 // Every step is guarded: on any failure the host dropdown keeps working unchanged.
 
 // Sibling modules are imported by the loader with the same ?v=<version> query and injected into install()
@@ -15,7 +18,7 @@ let core;
 let api;
 let installStorePatch;
 
-const VERSION = "1.1.0";
+const VERSION = "1.2.0";
 const GLOBAL = "__providerProfilesFavorites";
 const INPUT_SELECTOR = 'input[x-model="model.name"]';
 const RESULTS = ".model-search-results";
@@ -64,15 +67,21 @@ export async function install(deps) {
   const boot = await api.bootstrap();
   if (!boot.ok) return null; // favorites service unavailable: leave the host UI untouched
   const settings = boot.settings || {};
-  if (settings.favorites_ui === "off") return null;
+  const discoveryDeps = deps.discovery || null; // optional: favorites keep working when its modules failed to load
+  let favoritesOn = settings.favorites_ui !== "off";
+  if (!favoritesOn && !(discoveryDeps && settings.discovery_enabled !== false)) return null; // both off: the host UI stays as shipped
 
   const controller = new AbortController();
   const { signal } = controller;
   const state = { settings, types: boot.types || {}, rev: boot.rev || 0, index: new Map() };
+  const discovery = discoveryDeps && settings.discovery_enabled !== false
+    ? discoveryDeps.ui.createDiscovery({ merge: discoveryDeps.merge, api: discoveryDeps.api, getSettings: () => state.settings })
+    : null;
   const fields = new Set();
   const attached = new WeakSet();
   const observers = [];
   let storePatch = null;
+  let discoveryPatch = null;
   let store = null;
   let yielded = false;
   let queue = Promise.resolve();
@@ -89,11 +98,13 @@ export async function install(deps) {
     disposed: false,
     state,
     fieldCount: () => fields.size,
+    hasDiscovery: Boolean(discovery),
     dispose() {
       instance.disposed = true;
       controller.abort();
       for (const observer of observers.splice(0)) observer.disconnect();
       for (const field of [...fields]) field.dispose();
+      discoveryPatch?.dispose();
       storePatch?.dispose();
       if (store && store.providerProfilesTyping) store.providerProfilesTyping = false;
       if (globalThis[GLOBAL] === instance) delete globalThis[GLOBAL];
@@ -107,14 +118,23 @@ export async function install(deps) {
     if (store) return store;
     const found = globalThis.Alpine?.store?.("modelConfig");
     if (!found) return null;
-    if (state.settings.favorites_ui !== "on" && core.detectHostFavorites(Object.keys(found))) {
+    if (favoritesOn && state.settings.favorites_ui !== "on" && core.detectHostFavorites(Object.keys(found))) {
       console.info("Provider Profiles: host provides its own model favorites; favorites UI disabled.");
-      yielded = true;
-      instance.dispose();
-      return null;
+      favoritesOn = false;
+      if (!discovery) {
+        yielded = true;
+        instance.dispose();
+        return null;
+      }
     }
     store = found;
-    storePatch = installStorePatch(store, () => state.settings, { groupForTyping: core.groupForTyping });
+    // Order matters: discovery wraps outermost so it sees the same arguments the host field passes.
+    if (favoritesOn) storePatch = installStorePatch(store, () => state.settings, { groupForTyping: core.groupForTyping });
+    if (discovery) {
+      discoveryPatch = discovery.installStorePatch(store, {
+        getMode: () => (favoritesOn && state.settings.normal_results_mode === "narrow" ? "narrow" : "core"),
+      });
+    }
     return store;
   };
 
@@ -161,7 +181,8 @@ export async function install(deps) {
   }
 
   // ------------------------------------------------------------------ field controller
-  function createField(input, fc) {
+  // withFavorites=false: only the discovery decoration is attached (stars, card and type-ahead are not created).
+  function createField(input, fc, withFavorites) {
     const ac = new AbortController();
     const fieldSignal = ac.signal;
     const scope = () => globalThis.Alpine.$data(fc);
@@ -171,33 +192,45 @@ export async function install(deps) {
       return { ...core.effectiveField(s), name: String(s?.model?.name ?? "").trim() };
     };
     const typeName = () => (core.MODEL_TYPES.includes(modelType()) ? modelType() : null);
+    // What the host passes to its search for this field (provider/base fallbacks included; embedding vs chat endpoint).
+    const discoveryCtx = () => {
+      const s = scope();
+      const f = core.effectiveField(s);
+      return { provider: f.provider, apiBase: f.apiBase, modelType: s?.searchType === "embedding" ? "embedding" : "chat" };
+    };
 
     const ctl = { open: false, showAll: false, lastQuery: null, token: 0, timer: null, typingLocal: false };
     const injected = [];
 
-    const inputStar = el("button", "pp-star pp-star-input", "☆");
-    inputStar.type = "button";
-    inputStar.setAttribute("aria-label", "Favorite this model");
-    input.after(inputStar);
-    injected.push(inputStar);
-    fc.classList.add("pp-has-star");
+    const inputStar = withFavorites ? el("button", "pp-star pp-star-input", "☆") : null;
+    if (inputStar) {
+      inputStar.type = "button";
+      inputStar.setAttribute("aria-label", "Favorite this model");
+      input.after(inputStar);
+      injected.push(inputStar);
+      fc.classList.add("pp-has-star");
+    }
 
-    const card = el("div", "pp-card");
-    card.hidden = true;
-    card.setAttribute("x-ignore", "");
-    card.setAttribute("role", "listbox");
-    card.setAttribute("aria-label", "Favorite models");
-    fc.append(card);
-    injected.push(card);
+    const card = withFavorites ? el("div", "pp-card") : null;
+    if (card) {
+      card.hidden = true;
+      card.setAttribute("x-ignore", "");
+      card.setAttribute("role", "listbox");
+      card.setAttribute("aria-label", "Favorite models");
+      fc.append(card);
+      injected.push(card);
+    }
 
     // Keep the host results box flush below the card even when the card's height changes after render (fonts, wrapping).
     let resizeWatcher = null;
-    try {
-      resizeWatcher = new ResizeObserver(() => {
-        if (!card.hidden) fc.style.setProperty("--pp-h", `${card.offsetHeight}px`);
-      });
-      resizeWatcher.observe(card);
-    } catch { /* older engines: the height measured at render time is used */ }
+    if (card) {
+      try {
+        resizeWatcher = new ResizeObserver(() => {
+          if (!card.hidden) fc.style.setProperty("--pp-h", `${card.offsetHeight}px`);
+        });
+        resizeWatcher.observe(card);
+      } catch { /* older engines: the height measured at render time is used */ }
+    }
 
     const paintStar = (button, on, usable, label) => {
       button.textContent = on ? "★" : "☆";
@@ -222,11 +255,13 @@ export async function install(deps) {
     };
 
     function paintInputStar() {
+      if (!inputStar) return;
       const { name } = current();
       paintStar(inputStar, isFav(name), canFavorite(name), "Choose a provider, a valid API base and a model name first");
     }
 
-    function decorateRows() {
+    function decorateStars() {
+      if (!withFavorites) return;
       for (const row of fc.querySelectorAll(`:scope > ${RESULTS} > .model-search-item:not(.disabled)`)) {
         let star = row.querySelector(":scope > .pp-star");
         const id = globalThis.Alpine.$data(row)?.m;
@@ -245,6 +280,11 @@ export async function install(deps) {
         star.dataset.ppId = id;
         paintStar(star, isFav(id), canFavorite(id), "Choose a provider and a valid API base first");
       }
+    }
+
+    function paintRows() {
+      decorateStars();
+      if (discovery) discovery.paint(fc, discoveryCtx());
     }
 
     function rowFor(entry) {
@@ -284,6 +324,7 @@ export async function install(deps) {
     }
 
     function renderCard() {
+      if (!card) return;
       const t = typeName();
       const entries = t ? state.types[t] || [] : [];
       if (!ctl.open || !entries.length) {
@@ -318,6 +359,7 @@ export async function install(deps) {
     }
 
     function openCard() {
+      if (!card) return;
       ctl.open = true;
       renderCard();
     }
@@ -398,38 +440,41 @@ export async function install(deps) {
         const id = globalThis.Alpine.$data(row)?.m;
         const t = typeName();
         const f = core.effectiveField(scope());
-        if (typeof id === "string" && t && core.isFavorite(state.index, t, f.provider, f.apiBase, id)) {
+        if (withFavorites && typeof id === "string" && t && core.isFavorite(state.index, t, f.provider, f.apiBase, id)) {
           applyOp({ kind: "touch", type: t, provider: f.provider, apiBase: f.apiBase, name: id });
         }
-        setTyping(false);
+        if (withFavorites) setTyping(false);
+        if (discovery && typeof id === "string") discovery.afterSelect(discoveryCtx(), id, t, () => scope()?.model, discoveryCtx);
       }
     }, { capture: true, signal: fieldSignal });
-    inputStar.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      toggle(current().name);
-    }, { signal: fieldSignal });
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") openCard();
-      if (event.key === "Escape") closeCard();
-    }, { signal: fieldSignal });
-    input.addEventListener("input", () => {
-      setTyping(true);
-      openCard();
-      clearTimeout(ctl.timer);
-      ctl.timer = setTimeout(kick, TYPE_AHEAD_MS);
-      paintInputStar();
-    }, { signal: fieldSignal });
-    document.addEventListener("pointerdown", (event) => {
-      if (ctl.open && !fc.contains(event.target)) closeCard();
-    }, { capture: true, signal: fieldSignal });
+    if (withFavorites) {
+      inputStar.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggle(current().name);
+      }, { signal: fieldSignal });
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") openCard();
+        if (event.key === "Escape") closeCard();
+      }, { signal: fieldSignal });
+      input.addEventListener("input", () => {
+        setTyping(true);
+        openCard();
+        clearTimeout(ctl.timer);
+        ctl.timer = setTimeout(kick, TYPE_AHEAD_MS);
+        paintInputStar();
+      }, { signal: fieldSignal });
+      document.addEventListener("pointerdown", (event) => {
+        if (ctl.open && !fc.contains(event.target)) closeCard();
+      }, { capture: true, signal: fieldSignal });
+    }
 
     // Close with the host dropdown (selection / outside click) once it has been shown. The host swaps between
     // its two result boxes with a gap (one hides immediately, the other shows a frame later), so a "hidden"
     // reading only counts when it persists.
     let wasVisible = false;
     let closeTimer = null;
-    const styleWatcher = new MutationObserver(() => {
+    const styleWatcher = withFavorites ? new MutationObserver(() => {
       if (coreVisible()) {
         wasVisible = true;
         clearTimeout(closeTimer);
@@ -443,23 +488,35 @@ export async function install(deps) {
           closeCard();
         }
       }, 300);
-    });
-    const rowWatcher = new MutationObserver(() => decorateRows());
+    }) : null;
+    // Row decoration (stars, chips, notes) follows the host's own re-rendering. It is idempotent, so the nodes it
+    // adds do not retrigger it more than once.
+    const rowWatcher = new MutationObserver(() => paintRows());
     for (const box of fc.querySelectorAll(`:scope > ${RESULTS}`)) {
-      styleWatcher.observe(box, { attributes: true, attributeFilter: ["style"] });
+      styleWatcher?.observe(box, { attributes: true, attributeFilter: ["style"] });
       rowWatcher.observe(box, { childList: true });
     }
 
     let effect = null;
-    try {
-      effect = globalThis.Alpine.effect(() => paintInputStar());
-    } catch { /* events keep the star current */ }
+    if (withFavorites) {
+      try {
+        effect = globalThis.Alpine.effect(() => paintInputStar());
+      } catch { /* events keep the star current */ }
+    }
+
+    // A discovery answer that arrives after the dropdown opened (slow server) still decorates the rows.
+    const unsubscribe = discovery?.subscribe((key) => {
+      try {
+        const c = discoveryCtx();
+        if (key === discovery.keyFor(c.provider, c.apiBase, c.modelType)) paintRows();
+      } catch { /* the field went away */ }
+    });
 
     const field = {
       isConnected: () => input.isConnected,
       refresh() {
         paintInputStar();
-        decorateRows();
+        paintRows();
         if (ctl.open) renderCard();
       },
       dispose() {
@@ -467,11 +524,14 @@ export async function install(deps) {
         clearTimeout(ctl.timer);
         clearTimeout(closeTimer);
         resizeWatcher?.disconnect();
-        styleWatcher.disconnect();
+        styleWatcher?.disconnect();
         rowWatcher.disconnect();
+        unsubscribe?.();
         try { if (effect) globalThis.Alpine.release(effect); } catch { /* ignore */ }
         for (const node of injected) node.remove();
         for (const star of fc.querySelectorAll(".pp-star")) star.remove();
+        for (const row of fc.querySelectorAll(".pp-row")) row.classList.remove("pp-row");
+        discovery?.clear(fc);
         fc.classList.remove("pp-has-star", "pp-open");
         fc.style.removeProperty("--pp-h");
         fields.delete(field);
@@ -494,9 +554,13 @@ export async function install(deps) {
       return scope && typeof scope.doSearch === "function" && scope.model && core.MODEL_TYPES.includes(scope.modelType);
     }, 8000, 50);
     if (!ready || instance.disposed || !input.isConnected) { attached.delete(input); return; }
-    if (state.settings.favorites_ui !== "on" && fc.querySelector('[class*="favorite" i]:not([class*="pp-"])')) return;
+    // Favorites stay out of a field that already carries someone else's favorites markup; discovery does not care.
+    const foreignFavorites = state.settings.favorites_ui !== "on" && Boolean(fc.querySelector('[class*="favorite" i]:not([class*="pp-"])'));
+    if (foreignFavorites && !discovery) return;
     if (!ensureStore()) { attached.delete(input); return; }
-    try { createField(input, fc); } catch (error) { console.warn("Provider Profiles: favorites unavailable for a field", error); }
+    const withFavorites = favoritesOn && !foreignFavorites;
+    if (!withFavorites && !discovery) return;
+    try { createField(input, fc, withFavorites); } catch (error) { console.warn("Provider Profiles: model field enhancements unavailable for a field", error); }
   }
 
   function scan(root) {

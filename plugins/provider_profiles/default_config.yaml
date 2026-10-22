@@ -5,3 +5,5 @@ local_provider_defaults:
   lm_studio: http://host.docker.internal:1234/v1
   ollama: http://host.docker.internal:11434
 clear_stale_model_on_new_provider: true
+discovery_enabled: true
+discovery_fill_on_select: false

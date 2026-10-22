@@ -22,6 +22,17 @@
         </select>
       </label>
 
+      <label class="checkbox-label">
+        <input type="checkbox" :checked="config.discovery_enabled ?? true"
+               @change="config.discovery_enabled = $event.target.checked">
+        Discover models on local servers (LM Studio, llama.cpp, Ollama, routers) and show their state, aliases and context
+      </label>
+      <label class="checkbox-label">
+        <input type="checkbox" :checked="config.discovery_fill_on_select ?? false"
+               @change="config.discovery_fill_on_select = $event.target.checked">
+        Fill context length and vision from the server when a discovered model is selected
+      </label>
+
       <label>LM Studio API base
         <input type="url" x-model="config.local_provider_defaults.lm_studio">
       </label>

@@ -309,7 +309,18 @@ class FavoritesUiMixin:
         self.assertEqual(page.evaluate("typeof window.__providerProfilesFavorites"), "undefined")
 
     def test_yields_when_the_host_ships_its_own_favorites(self):
+        # Only the favorites step aside; discovery (a separate feature) keeps decorating the host's rows.
         page = self.open_harness(ext=self.FAVORITES_EXT, favorites={}, params={"hostFavorites": "1"})
+        page.wait_for_timeout(1000)
+        self.assertEqual(page.locator(".pp-star, .pp-card").count(), 0)
+        self.assertTrue(page.evaluate("window.__providerProfilesFavorites.hasDiscovery"))
+        page.click(CHAT_INPUT)
+        page.wait_for_selector(CHAT_ROWS)
+        self.assertEqual(page.locator(".pp-star, .pp-card").count(), 0)
+        self.assertEqual(self.server.state.calls("/model_search")[-1]["body"]["query"], "deepseek/deepseek-v4", "no favorites patch: official request")
+
+    def test_yields_completely_when_the_host_ships_favorites_and_discovery_is_off(self):
+        page = self.open_harness(ext=self.FAVORITES_EXT, favorites={"discovery_enabled": False}, params={"hostFavorites": "1"})
         page.wait_for_timeout(1000)
         self.assertEqual(page.locator(".pp-star, .pp-card").count(), 0)
         self.assertEqual(page.evaluate("typeof window.__providerProfilesFavorites"), "undefined")

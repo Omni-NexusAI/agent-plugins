@@ -1,0 +1,536 @@
+{
+  "llama_swap": {
+    "entries": [
+      {
+        "aliases": [
+          "gpt-4o-mini"
+        ],
+        "context": {
+          "configured": 32768,
+          "max": null,
+          "served": null
+        },
+        "failed": false,
+        "id": "qwen-fast",
+        "kind": null,
+        "label": "Qwen fast",
+        "quant": null,
+        "state": "loaded",
+        "vision": null
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": null,
+          "served": null
+        },
+        "failed": false,
+        "id": "gemma-vision",
+        "kind": null,
+        "label": "Gemma vision",
+        "quant": null,
+        "state": "unloaded",
+        "vision": true
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": null,
+          "served": null
+        },
+        "failed": false,
+        "id": "bge-embed",
+        "kind": "embedding",
+        "label": "BGE",
+        "quant": null,
+        "state": "unloaded",
+        "vision": null
+      }
+    ],
+    "kind": "llama_swap"
+  },
+  "llamacpp_router": {
+    "entries": [
+      {
+        "aliases": [
+          "qwen38-mini"
+        ],
+        "context": {
+          "configured": 131072,
+          "max": null,
+          "served": null
+        },
+        "failed": false,
+        "id": "qwen38-27b-apex-mini",
+        "kind": null,
+        "label": null,
+        "quant": null,
+        "state": "loaded",
+        "vision": null
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": 81920,
+          "max": null,
+          "served": null
+        },
+        "failed": false,
+        "id": "qwen38-27b-apex-mini-vision",
+        "kind": null,
+        "label": null,
+        "quant": null,
+        "state": "unloaded",
+        "vision": true
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": 32768,
+          "max": null,
+          "served": null
+        },
+        "failed": false,
+        "id": "ornith-1.5-35b-gpukv-128k-vision",
+        "kind": null,
+        "label": null,
+        "quant": null,
+        "state": "sleeping",
+        "vision": null
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": null,
+          "served": null
+        },
+        "failed": false,
+        "id": "gemma-4-12b-qat",
+        "kind": null,
+        "label": null,
+        "quant": null,
+        "state": "downloading",
+        "vision": null
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": null,
+          "served": null
+        },
+        "failed": false,
+        "id": "half-downloaded-model",
+        "kind": null,
+        "label": null,
+        "quant": null,
+        "state": "incomplete",
+        "vision": null
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": null,
+          "served": null
+        },
+        "failed": true,
+        "id": "crashing-config",
+        "kind": null,
+        "label": null,
+        "quant": null,
+        "state": "unloaded",
+        "vision": null
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": null,
+          "served": null
+        },
+        "failed": false,
+        "id": "qwen3-embedding-0.6b",
+        "kind": "embedding",
+        "label": null,
+        "quant": null,
+        "state": "unloaded",
+        "vision": null
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": null,
+          "served": null
+        },
+        "failed": false,
+        "id": "qwen-image-edit-2509-q4",
+        "kind": null,
+        "label": null,
+        "quant": null,
+        "state": "unloaded",
+        "vision": null
+      }
+    ],
+    "kind": "llama_cpp_router"
+  },
+  "llamacpp_single": {
+    "entries": [
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": 131072,
+          "served": 65536
+        },
+        "failed": false,
+        "id": "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf",
+        "kind": null,
+        "label": null,
+        "quant": null,
+        "state": "loaded",
+        "vision": true
+      }
+    ],
+    "kind": "llama_cpp"
+  },
+  "lmstudio_openai_only": {
+    "entries": [
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": null,
+          "served": null
+        },
+        "failed": false,
+        "id": "qwen/qwen3-30b-a3b",
+        "kind": null,
+        "label": null,
+        "quant": null,
+        "state": "unknown",
+        "vision": null
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": null,
+          "served": null
+        },
+        "failed": false,
+        "id": "google/gemma-3-12b",
+        "kind": null,
+        "label": null,
+        "quant": null,
+        "state": "unknown",
+        "vision": null
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": null,
+          "served": null
+        },
+        "failed": false,
+        "id": "text-embedding-nomic-embed-text-v1.5",
+        "kind": null,
+        "label": null,
+        "quant": null,
+        "state": "unknown",
+        "vision": null
+      }
+    ],
+    "kind": "openai_compatible"
+  },
+  "lmstudio_v0": {
+    "entries": [
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": 262144,
+          "served": 32768
+        },
+        "failed": false,
+        "id": "qwen/qwen3-30b-a3b",
+        "kind": "chat",
+        "label": null,
+        "quant": "Q4_K_M",
+        "state": "loaded",
+        "vision": false
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": 131072,
+          "served": null
+        },
+        "failed": false,
+        "id": "google/gemma-3-12b",
+        "kind": "chat",
+        "label": null,
+        "quant": "Q4_0",
+        "state": "unloaded",
+        "vision": true
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": 2048,
+          "served": null
+        },
+        "failed": false,
+        "id": "text-embedding-nomic-embed-text-v1.5",
+        "kind": "embedding",
+        "label": null,
+        "quant": null,
+        "state": "unloaded",
+        "vision": null
+      }
+    ],
+    "kind": "lm_studio"
+  },
+  "lmstudio_v1": {
+    "entries": [
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": 262144,
+          "served": 32768
+        },
+        "failed": false,
+        "id": "qwen/qwen3-30b-a3b",
+        "kind": "chat",
+        "label": "Qwen3 30B A3B",
+        "quant": "Q4_K_M",
+        "state": "loaded",
+        "vision": false
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": 131072,
+          "served": null
+        },
+        "failed": false,
+        "id": "google/gemma-3-12b",
+        "kind": "chat",
+        "label": "Gemma 3 12B",
+        "quant": "Q4_0",
+        "state": "unloaded",
+        "vision": true
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": 2048,
+          "served": null
+        },
+        "failed": false,
+        "id": "text-embedding-nomic-embed-text-v1.5",
+        "kind": "embedding",
+        "label": "Nomic Embed",
+        "quant": null,
+        "state": "unloaded",
+        "vision": null
+      }
+    ],
+    "kind": "lm_studio"
+  },
+  "ollama": {
+    "entries": [
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": null,
+          "served": 8192
+        },
+        "failed": false,
+        "id": "llama3.1:8b",
+        "kind": null,
+        "label": null,
+        "quant": "Q4_K_M",
+        "state": "loaded",
+        "vision": null
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": null,
+          "served": null
+        },
+        "failed": false,
+        "id": "llama3.1:8b-instruct-q8_0",
+        "kind": null,
+        "label": null,
+        "quant": "Q8_0",
+        "state": "unloaded",
+        "vision": null
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": null,
+          "served": null
+        },
+        "failed": false,
+        "id": "nomic-embed-text:latest",
+        "kind": "embedding",
+        "label": null,
+        "quant": "F16",
+        "state": "unloaded",
+        "vision": null
+      }
+    ],
+    "kind": "ollama"
+  },
+  "openai_generic": {
+    "entries": [
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": 32768,
+          "served": null
+        },
+        "failed": false,
+        "id": "my-served-model",
+        "kind": null,
+        "label": null,
+        "quant": null,
+        "state": "unknown",
+        "vision": null
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": null,
+          "served": null
+        },
+        "failed": false,
+        "id": "another-model",
+        "kind": null,
+        "label": null,
+        "quant": null,
+        "state": "unknown",
+        "vision": null
+      }
+    ],
+    "kind": "openai_compatible"
+  },
+  "strata_router": {
+    "entries": [
+      {
+        "aliases": [],
+        "context": {
+          "configured": 130560,
+          "max": null,
+          "served": 130560
+        },
+        "failed": false,
+        "id": "qwen3.8-flash-next-iq3_xxs-strata-mtp-vision-128k",
+        "kind": null,
+        "label": null,
+        "quant": null,
+        "state": "unloaded",
+        "vision": true
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": 130560,
+          "max": null,
+          "served": 130560
+        },
+        "failed": false,
+        "id": "qwen3.8-flash-next-iq3_xxs-strata-mtp-text-128k",
+        "kind": null,
+        "label": null,
+        "quant": null,
+        "state": "unloaded",
+        "vision": false
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": 163328,
+          "max": null,
+          "served": 163328
+        },
+        "failed": false,
+        "id": "qwen3.8-flash-next-iq3_xxs-strata-mtp-vision-160k",
+        "kind": null,
+        "label": null,
+        "quant": null,
+        "state": "loaded",
+        "vision": true
+      }
+    ],
+    "kind": "strata_router"
+  },
+  "unsloth": {
+    "entries": [
+      {
+        "aliases": [],
+        "context": {
+          "configured": 32768,
+          "max": 40960,
+          "served": null
+        },
+        "failed": false,
+        "id": "unsloth/Qwen3-8B-GGUF:Q4_K_XL",
+        "kind": null,
+        "label": null,
+        "quant": "Q4_K_XL",
+        "state": "loaded",
+        "vision": null
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": 40960,
+          "served": null
+        },
+        "failed": false,
+        "id": "my-qwen-alias",
+        "kind": null,
+        "label": null,
+        "quant": "Q8_0",
+        "state": "unloaded",
+        "vision": null
+      },
+      {
+        "aliases": [],
+        "context": {
+          "configured": null,
+          "max": null,
+          "served": null
+        },
+        "failed": false,
+        "id": "unsloth/embeddinggemma-300m",
+        "kind": "embedding",
+        "label": null,
+        "quant": null,
+        "state": "unloaded",
+        "vision": null
+      }
+    ],
+    "kind": "unsloth"
+  }
+}
