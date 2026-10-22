@@ -44,13 +44,16 @@ class DomCase(unittest.TestCase):
 
     FAVORITES_EXT = "_10_provider_profiles.html,_20_model_favorites.html"
 
-    def open_harness(self, *, ext="", order="ext-first", setup=None, favorites=None, params=None, init_script=None):
-        """favorites: None = no favorites service; dict = settings overrides for the real store-backed service."""
+    def open_harness(self, *, ext="", order="ext-first", setup=None, favorites=None, params=None, init_script=None, discovery=None):
+        """favorites: None = no favorites service; dict = settings overrides for the real store-backed service.
+        discovery: None = no discover_models service (404); dict = kwargs of HarnessState.enable_discovery()."""
         server = HarnessServer(self.host)
         if favorites is not None:
             tmp = tempfile.TemporaryDirectory()
             self.addCleanup(tmp.cleanup)
             server.state.enable_favorites(tmp.name, favorites)
+        if discovery is not None:
+            server.state.enable_discovery(**discovery)
         if setup:
             setup(server.state)
         server.start()

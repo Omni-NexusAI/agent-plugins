@@ -15,6 +15,11 @@ MOUNT = """async (initial) => {
 }"""
 
 
+CLEAR_STALE = "#cfg label:has-text('Clear a stale model') input[type=checkbox]"
+DISCOVERY = "#cfg label:has-text('Discover models on local servers') input[type=checkbox]"
+FILL = "#cfg label:has-text('Fill context length and vision') input[type=checkbox]"
+
+
 class ConfigUi(DomCase):
     host = "v2.14"
 
@@ -38,7 +43,9 @@ class ConfigUi(DomCase):
         self.assertEqual(page.eval_on_selector("#cfg select >> nth=0", "e => e.value"), "auto")
         self.assertEqual(page.eval_on_selector("#cfg input[type=number]", "e => e.value"), "5")
         self.assertEqual(page.eval_on_selector("#cfg select >> nth=1", "e => e.value"), "narrow")
-        self.assertTrue(page.is_checked("#cfg input[type=checkbox]"))
+        self.assertTrue(page.is_checked(CLEAR_STALE))
+        self.assertTrue(page.is_checked(DISCOVERY), "discovery defaults to on for an old config")
+        self.assertFalse(page.is_checked(FILL), "filling numbers from the server defaults to off")
 
     def test_edits_write_the_new_keys(self):
         page = self.mount({"local_provider_defaults": {"lm_studio": "http://a/v1", "ollama": "http://b"}})
@@ -46,13 +53,17 @@ class ConfigUi(DomCase):
         page.fill("#cfg input[type=number]", "7")
         page.select_option("#cfg select >> nth=1", "core")
         page.fill("#cfg input[type=url] >> nth=0", "http://changed:1234/v1")
-        page.uncheck("#cfg input[type=checkbox]")
+        page.uncheck(CLEAR_STALE)
+        page.uncheck(DISCOVERY)
+        page.check(FILL)
         cfg = self.config()
         self.assertEqual(cfg["favorites_ui"], "off")
         self.assertEqual(cfg["favorites_shown"], 7)
         self.assertEqual(cfg["normal_results_mode"], "core")
         self.assertEqual(cfg["local_provider_defaults"]["lm_studio"], "http://changed:1234/v1")
         self.assertFalse(cfg["clear_stale_model_on_new_provider"])
+        self.assertFalse(cfg["discovery_enabled"])
+        self.assertTrue(cfg["discovery_fill_on_select"])
 
     def test_renders_nothing_without_a_config(self):
         page = self.mount({}, wait=False)

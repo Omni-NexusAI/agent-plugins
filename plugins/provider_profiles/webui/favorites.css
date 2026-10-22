@@ -151,3 +151,83 @@
 .pp-card-more:hover {
   opacity: 1;
 }
+
+/* ---- Local endpoint discovery: chips under the host's result rows, reason and endpoint lines ---- */
+.model-search-item.pp-has-meta {
+  padding-right: 30px; /* room for the star even when the row is two lines tall */
+}
+
+.pp-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+
+.pp-tag {
+  display: inline-block;
+  margin: 0 4px 2px 0;
+  padding: 0 6px;
+  border: 1px solid var(--color-border, #555);
+  border-radius: 999px;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+.pp-tag-label {
+  border-color: transparent;
+  padding-left: 0;
+  font-style: italic;
+  opacity: 0.65;
+}
+
+.pp-tag-state-loaded {
+  color: var(--color-success, #3fb950);
+  border-color: var(--color-success, #3fb950);
+}
+
+.pp-tag-state-loading,
+.pp-tag-state-downloading {
+  color: var(--color-warning, #d29922);
+  border-color: var(--color-warning, #d29922);
+}
+
+.pp-tag-state-sleeping {
+  color: var(--color-info, #58a6ff);
+  border-color: var(--color-info, #58a6ff);
+}
+
+.pp-tag-state-incomplete {
+  color: var(--color-warning, #db6d28);
+  border-color: var(--color-warning, #db6d28);
+}
+
+.pp-tag-failed {
+  color: var(--color-error, #f85149);
+  border-color: var(--color-error, #f85149);
+}
+
+.pp-reason {
+  padding: 6px 8px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  cursor: default;
+}
+
+.pp-reason-main {
+  display: block;
+  font-weight: 600;
+}
+
+.pp-reason-more {
+  display: block;
+  opacity: 0.75;
+}
+
+.pp-endpoint {
+  padding: 3px 8px;
+  font-size: 0.66rem;
+  border-top: 1px solid var(--color-border, #555);
+  opacity: 0.55;
+  cursor: default;
+}
