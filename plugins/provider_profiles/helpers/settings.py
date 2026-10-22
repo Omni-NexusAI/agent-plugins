@@ -20,7 +20,11 @@ DEFAULTS: dict[str, Any] = {
     "normal_results_mode": "narrow",
     "local_provider_defaults": dict(BUILTIN_LOCAL_DEFAULTS),
     "clear_stale_model_on_new_provider": True,
+    "discovery_enabled": True,
+    "discovery_fill_on_select": False,
 }
+
+BOOLEAN_KEYS = ("clear_stale_model_on_new_provider", "discovery_enabled", "discovery_fill_on_select")
 
 FAVORITES_UI = ("auto", "on", "off")
 NORMAL_RESULTS_MODES = ("narrow", "core")
@@ -55,6 +59,7 @@ def merge_settings(raw: Any) -> dict[str, Any]:
             if isinstance(value, str) and value.strip():
                 merged["local_provider_defaults"][key] = value.strip()
 
-    if isinstance(raw.get("clear_stale_model_on_new_provider"), bool):
-        merged["clear_stale_model_on_new_provider"] = raw["clear_stale_model_on_new_provider"]
+    for key in BOOLEAN_KEYS:
+        if isinstance(raw.get(key), bool):
+            merged[key] = raw[key]
     return merged

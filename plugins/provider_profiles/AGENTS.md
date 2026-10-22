@@ -11,9 +11,10 @@ This is a plugin-local implementation for official Agent Zero. Through 1.0.2 it 
 ## Ownership
 
 - `README.md` owns user-facing behavior, the compatibility table and the list of host dependencies.
-- `default_config.yaml` owns defaults for every setting the code reads (`favorites_ui`, `favorites_shown`, `normal_results_mode`, `local_provider_defaults`, `clear_stale_model_on_new_provider`); `helpers/settings.py` validates and merges them (Agent Zero replaces defaults wholesale once a `config.json` exists).
+- `default_config.yaml` owns defaults for every setting the code reads (`favorites_ui`, `favorites_shown`, `normal_results_mode`, `local_provider_defaults`, `clear_stale_model_on_new_provider`, `discovery_enabled`, `discovery_fill_on_select`); `helpers/settings.py` validates and merges them (Agent Zero replaces defaults wholesale once a `config.json` exists).
 - `webui/config.html` owns the user-editable settings UI; it must bind every key in `default_config.yaml` and nothing else.
 - `helpers/favorites_store.py` owns favorites storage, identity canonicalization and request dispatch; `api/favorites.py` is a thin `ApiHandler` (exactly one handler class per file: the host loader takes the alphabetically last subclass).
+- `helpers/endpoint_parsers.py` owns the pure response parsers and the normalized entry shape; `helpers/endpoint_discovery.py` owns the address gate, pinned HTTP, probe plans, key selection, errors and cache; `api/discover_models.py` is the thin `ApiHandler` that injects the host's provider config and key store.
 - `extensions/webui/page-head/_10_provider_profiles.html` owns provider memory (patching of `modelConfig`, `__providerProfiles` registry incl. `switchProvider`).
 - `extensions/webui/page-head/_20_model_favorites.html` is the loader for `webui/favorites-ui.js` (DOM glue), `webui/favorites-core.js` (pure logic), `webui/favorites-api.js`, `webui/store-patch.js` and `webui/favorites.css`.
 - `webui/thumbnail.svg` is the canonical blue-server Provider Profiles icon

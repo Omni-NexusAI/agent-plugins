@@ -95,6 +95,8 @@ Edit from the plugin Settings screen. Missing keys fall back to the defaults bel
 | `local_provider_defaults.lm_studio` | `http://host.docker.internal:1234/v1` | API base filled in for LM Studio |
 | `local_provider_defaults.ollama` | `http://host.docker.internal:11434` | API base filled in for Ollama |
 | `clear_stale_model_on_new_provider` | `true` | Clear the model name when the new provider has no saved selection |
+| `discovery_enabled` | `true` | Ask local inference servers (LM Studio, llama.cpp and routers, Ollama, vLLM, ...) for their models, aliases, state and context. Off: no extra request is made |
+| `discovery_fill_on_select` | `false` | When a discovered model is selected, also fill the context length and vision flag from the server's own numbers |
 
 An API base that carries credentials (`user:pass@`) or a query string cannot be
 favorited, so secrets never reach `favorites.json`. An empty API base and an explicitly
