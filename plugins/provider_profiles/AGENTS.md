@@ -2,11 +2,11 @@
 
 ## Purpose
 
-`provider_profiles` owns provider-aware model memory, per-model-type model favorites, and (planned, second PR) local-endpoint model discovery for official Agent Zero model configuration UIs.
+`provider_profiles` owns provider-aware model memory, per-model-type model favorites and local-endpoint model discovery (llama.cpp routers and aliases, LM Studio, Ollama, other OpenAI-compatible servers) for official Agent Zero model configuration UIs.
 
 ## Sync Status
 
-This is a plugin-local implementation for official Agent Zero. Through 1.0.2 it mirrored the Agentspine `_provider_profiles` overlay byte for byte; from 1.1.0 it diverges on purpose (Agent Zero v2.14 `_kwargs_text` fix, favorites) and Agentspine is not a target: the Spine package `_provider_profiles` is separate and the Spine 9.9 startup sanitizer archives `usr/plugins/provider_profiles`. Profile state still uses the inherited `_provider_profiles` plugin-config namespace (see Local Contracts).
+This is a plugin-local implementation for official Agent Zero. Through 1.0.2 it mirrored the Agentspine `_provider_profiles` overlay byte for byte; from 1.1.0 it diverges on purpose (Agent Zero v2.14 `_kwargs_text` fix, favorites; local endpoint discovery from 1.2.0) and Agentspine is not a target: the Spine package `_provider_profiles` is separate and the Spine 9.9 startup sanitizer archives `usr/plugins/provider_profiles`. Profile state still uses the inherited `_provider_profiles` plugin-config namespace (see Local Contracts).
 
 ## Ownership
 
@@ -16,7 +16,7 @@ This is a plugin-local implementation for official Agent Zero. Through 1.0.2 it 
 - `helpers/favorites_store.py` owns favorites storage, identity canonicalization and request dispatch; `api/favorites.py` is a thin `ApiHandler` (exactly one handler class per file: the host loader takes the alphabetically last subclass).
 - `helpers/endpoint_parsers.py` owns the pure response parsers and the normalized entry shape; `helpers/endpoint_discovery.py` owns the address gate, pinned HTTP, probe plans, key selection, errors and cache; `api/discover_models.py` is the thin `ApiHandler` that injects the host's provider config and key store.
 - `extensions/webui/page-head/_10_provider_profiles.html` owns provider memory (patching of `modelConfig`, `__providerProfiles` registry incl. `switchProvider`).
-- `extensions/webui/page-head/_20_model_favorites.html` is the loader for `webui/favorites-ui.js` (DOM glue), `webui/favorites-core.js` (pure logic), `webui/favorites-api.js`, `webui/store-patch.js` and `webui/favorites.css`.
+- `extensions/webui/page-head/_20_model_favorites.html` is the loader for `webui/favorites-ui.js` (field controller shared by favorites and discovery), `webui/favorites-core.js` (pure logic), `webui/favorites-api.js`, `webui/store-patch.js` and `webui/favorites.css`; it also loads the optional discovery modules `webui/discovery-ui.js` (store wrapper, row chips, notes), `webui/discovery-merge.js` (pure: normalization, union, chips, fill) and `webui/discovery-api.js` with `Promise.allSettled`, so a failed discovery module never costs the favorites.
 - `webui/thumbnail.svg` is the canonical blue-server Provider Profiles icon
   (SHA-256 `100083e05d213c528dd7a5ececbdec0d427d9b1628a55e28f14a05b7b14ad877`);
   do not restore the archived three-slider asset.
@@ -45,17 +45,19 @@ This is a plugin-local implementation for official Agent Zero. Through 1.0.2 it 
 - Storage is server-side `usr/plugins/provider_profiles/favorites.json` (removed with the plugin), never the plugin `config.json`. Writes are idempotent server-side operations under a lock file (module-level locks are unsafe: the host purges plugin modules), atomic with a `.bak`; corrupt files are quarantined.
 - The favorites UI must not add a second body-wide observer; it mounts per modal (`modal-content-loaded`) and per field.
 
-### Local Discovery (second PR, in progress on `feat/provider-profiles-discovery`, stacked on the favorites PR)
+### Local Discovery (1.2.0)
 
-- **Phase 0 comes first**: `tests/test_core_search_characterization.py` runs the pinned upstream `model_search.py` (v2.11 and v2.14) against fake endpoint servers and records what the host already does (ids only, text filtering, name-based drops, silent failures, auth handling) before any feature is built. Features must close measured gaps only; the host stays the baseline.
-- Layers on top of the host `model_search`; never replaces it or edits its request. Server-side and GET-only (`api/discover_models.py`, `helpers/endpoint_discovery.py`, `helpers/endpoint_parsers.py`).
-- Gate on the **resolved IP class**: loopback, RFC1918 and CGNAT (100.64/10) are probed; link-local and metadata (169.254/16, fe80::/10), unspecified and multicast are refused (`blocked`); public hosts are skipped (`skipped: public_host`, the host search covers cloud providers). The connection is pinned to the checked address.
-- No redirects, no query strings (llama.cpp `?reload=`), http(s) only, 2 MiB response cap, at most 3 requests per call at 4 s each, 15 s TTL cache that never stores errors, `httpx` for TLS parity with the host (this plugin never sets `SSL_CERT_FILE`; private CAs are the operator's environment).
-- API key: the first stored key only (`models.get_api_key_raw` when present, otherwise the same dotenv lookups, because v2.11's `get_api_key` advances the multi-key round robin); `None` and placeholder keys count as no key; sent only to hosts that passed the gate. Unsaved UI keys are never sent (same as the host).
-- Never any model load, unload, `?reload` or autoloading `/props?model=` call; llama.cpp `status.args` / `status.preset` are never forwarded (they can hold `--api-key`); only derived numbers and booleans (context, vision) leave the parser; response bodies never appear in errors.
-- Normalized entries `{id, aliases, state, context{served|max|configured}, vision, kind, quant}` with the state vocabulary `loaded | loading | sleeping | unloaded | downloading | incomplete | downloaded | unknown`; categorized errors `unreachable | tls | unauthorized | forbidden | not_found | bad_payload | timeout | blocked` with fixed messages.
-- UI: runs concurrently with the host search under a 3 s deadline; returns the order-preserving union of ids (router aliases hidden by the host's text or name filter appear); no name-based chat/embedding filtering of local aliases (endpoint-provided type only); chips for state, context and vision; the categorized reason replaces the silent "No models found". Selecting a model never changes context length or vision unless `discovery_fill_on_select` (default false) is on.
-- Flags-off parity now also needs `discovery_enabled: false`: with `favorites_ui: off`, `normal_results_mode: core` and `discovery_enabled: false` no extra request is made and the DOM equals official behavior.
+- **Baseline first**: `tests/test_core_search_characterization.py` runs the pinned upstream `model_search.py` (v2.11 and v2.14) against fake endpoint servers and records what the host already does (ids only, text filtering, name-based drops, silent failures, auth handling, registry fallback). Discovery closes measured gaps only; the host stays the baseline. If a host release changes one of those measurements the matching test fails and discovery must be re-checked.
+- Layers on top of the host `model_search`; never replaces it or edits its request. Server side, GET only: `api/discover_models.py` (thin handler; injects the host's provider config and key store), `helpers/endpoint_discovery.py` (gate, pinned HTTP, probe plans, key choice, errors, cache), `helpers/endpoint_parsers.py` (pure parsers, entry shape). Browser side: `webui/discovery-ui.js`, `webui/discovery-merge.js`, `webui/discovery-api.js`.
+- Gate on the **resolved IP class**: loopback, RFC1918/ULA and CGNAT (100.64/10) are probed; link-local and metadata (169.254/16, fe80::/10, the cloud metadata addresses), unspecified, multicast and reserved are refused (`blocked`); public hosts are skipped (`skipped: public_host`, the host search covers cloud providers); a host with any non-local answer is not probed. The name is resolved once; the connection goes to a checked address (IPv4 first, at most two, the next only after a refused connection) while the entered name stays in `Host`, SNI and certificate verification.
+- No redirects, no query strings (llama.cpp `?reload=`), http(s) only, no proxy or environment trust (`trust_env=False`), 2 MiB response cap while streaming, at most 3 requests per call at 4 s each (10 s per call), success-only 15 s cache in a module dict (no shared asyncio futures: the host may run requests on different event loops). TLS trust is `httpx`'s default plus `SSL_CERT_FILE` / `SSL_CERT_DIR` exactly like the host's own calls; this plugin never sets them (private CAs are the operator's environment). `tests/test_endpoint_discovery.py` pins the request paths as literals with an AST check (no load/unload/reload endpoint can be built) and the absence of write methods.
+- API key: the first stored key only (`models.get_api_key_raw` when present, otherwise the same dotenv lookups, because v2.11's `get_api_key` advances the multi-key round robin); `None`, placeholder and non-header-safe keys count as no key; sent only to hosts that passed the gate; never in a response or a cache key. Unsaved UI keys are never sent (same as the host). No custom headers are forwarded.
+- Never any model load, unload, `?reload` or autoloading `/props?model=` call; llama.cpp `status.args` / `status.preset` are never forwarded (they can hold `--api-key`); only derived numbers and booleans (context, vision) leave the parser; response bodies never appear in errors (fixed messages built from host:port, provider id and a status code).
+- Response `{ok, skipped, endpoint{kind,label,host,requests,cached}, entries, error{category,message,hint}}`; `skipped` is `disabled | no_provider | no_base | public_host`. Entries are `{id, label, aliases, state, failed, context{served|max|configured}, vision, kind, quant}` (state vocabulary `loaded | loading | sleeping | unloaded | downloading | incomplete | downloaded | unknown`; `kind` only from the server's own tags, never guessed from the name). Error categories `unreachable | dns | timeout | tls | tls_protocol | unauthorized | forbidden | not_found | bad_payload | redirect | server_error | blocked | invalid_base`. `tests/vectors/discovery_entries.json` holds the golden parser output that the Python and JS suites both consume.
+- UI: favorites and discovery are independent features of one field controller (`favorites-ui.js`). Discovery wraps `searchModelsDetailed` outermost, runs concurrently with the host search under a 3 s deadline (the host result stands when discovery is late, chips follow when it answers), returns the sorted union of ids (router aliases and ids the host's filters dropped appear; `narrow` mode adds everything, `core` mode applies the host's own query rule), drops catalog suggestions once the endpoint answered, never filters local aliases by name, adds chips (state, context, vision, quant, alias, display name), the categorized reason instead of "No models found" (also above catalog suggestions when discovery failed) and a muted endpoint line. Injected nodes use `textContent`, `x-ignore` and no `title` attributes; decoration is idempotent (the row observer must not loop).
+- Selecting a row never changes context length or vision unless `discovery_fill_on_select` (default false) is on; then only the served, else configured, context (never the model maximum) and `vision: true` are filled, for chat and utility slots only.
+- Flags-off parity needs all three switches: with `favorites_ui: off`, `normal_results_mode: core` and `discovery_enabled: false` the plugin installs nothing, makes no extra request and adds no DOM. `discovery_enabled: false` alone leaves favorites untouched; `favorites_ui: off` alone leaves discovery working (core results mode). The `localStorage` kill switch `pp_favorites_ui=off` disables both.
+- Accepted risk: the endpoint can be asked to probe any allowed private address and reports reachability; the same session can already run code through the agent, so this adds no capability.
 
 ## Work Guidance
 
@@ -63,16 +65,18 @@ This is a plugin-local implementation for official Agent Zero. Through 1.0.2 it 
 - Preserve unknown model/provider fields when saving profiles.
 - Keep local-provider defaults in config and docs aligned.
 - Use Alpine's public `$data(element)` context for preset-editor model fields; retain the settings-context fallback for older direct-settings layouts.
-- Keep pure logic in `webui/favorites-core.js` (no DOM, Alpine or network) so it stays unit-testable.
+- Keep pure logic in `webui/favorites-core.js` and `webui/discovery-merge.js` (no DOM, Alpine or network; the latter has no sibling imports) so it stays unit-testable.
+- A change to a server's response shape starts in `tests/endpoint_payloads.py`, then the parser, then `UPDATE_VECTORS=1 python -m unittest tests.test_discovery_vectors` (review the diff of `tests/vectors/discovery_entries.json`). Never add a request path that is not a literal in `helpers/endpoint_discovery.py`.
+- Keep `helpers/endpoint_discovery.py` free of host imports: everything the host provides (provider config, stored key, settings) is injected by `api/discover_models.py`, which keeps the helper testable against fake endpoints without Agent Zero.
 
 ## Verification
 
 Run from this folder (offline):
 
-- `python -m unittest discover -s tests -t . -p "test_*.py"` (store, handler, hygiene, compat probe, Playwright DOM harness on pinned v2.11 and v2.14; DOM tests skip without Playwright).
+- `python -m unittest discover -s tests -t . -p "test_*.py"` (store, handler, hygiene, compat probe, host-search characterization, parsers, discovery network layer against real fake endpoints, Playwright DOM harness on pinned v2.11 and v2.14; DOM tests skip without Playwright).
 - `node --test "tests/js/*.test.mjs"`.
-- `python tests/compat/check_upstream.py <tag>` before upgrading Agent Zero (read-only network).
-- Manually: switch provider away and back (model, API base, context and kwargs restore); star a row and a typed name, reload, favorites persist; select a favorite from another provider; load on a host without the store and confirm no errors.
+- `python tests/compat/check_upstream.py <tag>` before upgrading Agent Zero (read-only network; also checks the discovery host dependencies).
+- Manually: switch provider away and back (model, API base, context and kwargs restore); star a row and a typed name, reload, favorites persist; select a favorite from another provider; load on a host without the store and confirm no errors; with a local server running, open the model list and compare the chips with the server's own state.
 - Live checks on a real Agent Zero instance need the owner's explicit approval.
 
 ## Child DOX Index

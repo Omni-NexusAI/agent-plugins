@@ -23,6 +23,14 @@
       "sha256": "3c7922bd8179191b6a91ff06a97d1949bd83dad3f5d29a1b2142f32393d0a67e",
       "bytes": 10270
     },
+    "models.py": {
+      "sha256": "4887ec3a10a9a2f981ada2fd6f03ec0807dbc4bd53b053d98d5f7247f01b316e",
+      "bytes": 36377
+    },
+    "helpers/providers.py": {
+      "sha256": "6d9d8ee12c46cfd8674c7b816304a056ad6d7141ebfdcb6f818b26839577e76c",
+      "bytes": 5984
+    },
     "conf/model_providers.yaml": {
       "sha256": "2e4c8f16d424a866f13bf2df6e5fcc906ffe8064e333b16f31af2d43355f8a94",
       "bytes": 9472

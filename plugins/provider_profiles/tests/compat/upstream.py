@@ -21,6 +21,8 @@ WATCHED = [
     "plugins/_model_config/webui/api-keys-mixin.js",
     "plugins/_model_config/webui/switcher-mixin.js",
     "plugins/_model_config/api/model_search.py",
+    "models.py",
+    "helpers/providers.py",
     "conf/model_providers.yaml",
     "webui/vendor/alpine/alpine.min.js",
 ]

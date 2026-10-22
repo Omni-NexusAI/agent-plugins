@@ -25,7 +25,10 @@ import upstream  # noqa: E402
 FIELD = "plugins/_model_config/webui/model-field.html"
 STORE = "plugins/_model_config/webui/model-config-store.js"
 SEARCH = "plugins/_model_config/api/model_search.py"
+MODELS = "models.py"
+PROVIDERS = "helpers/providers.py"
 ALPINE = "webui/vendor/alpine/alpine.min.js"
+FILES = (FIELD, STORE, SEARCH, MODELS, PROVIDERS, ALPINE)
 FIXTURES = HERE.parent / "fixtures"
 
 
@@ -44,6 +47,8 @@ def evaluate(files: dict[str, str]) -> list[tuple[str, str, str]]:
     field = files.get(FIELD)
     store = files.get(STORE)
     search = files.get(SEARCH)
+    models = files.get(MODELS)
+    providers = files.get(PROVIDERS)
     alpine = files.get(ALPINE)
 
     if field is None:
@@ -76,6 +81,11 @@ def evaluate(files: dict[str, str]) -> list[tuple[str, str, str]]:
         check(re.search(r"\bgroupResults\s*\(", code) is not None, "groupResults", "groupResults(")
         check("kwargsToText" in code and "textToKwargs" in code, "kwargs helpers", "kwargsToText / textToKwargs")
         check(re.search(r"\binstallSettingsHooks\s*\(", code) is not None, "installSettingsHooks", "installSettingsHooks(")
+        detailed = re.search(r"async\s+searchModelsDetailed\s*\(.*?\n  \},", code, flags=re.S)
+        body = detailed.group(0) if detailed else ""
+        check(re.search(r"\bmodels:\s*data\.models", body) is not None, "search result carries models",
+              "searchModelsDetailed returns { models: data.models, ... } (discovery merges into it)")
+        check("source:" in body and "error:" in body, "search result carries source and error", "{ source, error } (catalog suggestions, host toast)", warn=True)
         native_keys = sorted({m for m in re.findall(r"(?m)^\s{2}(?:async\s+)?([A-Za-z]\w*)\s*[(:]", code) if re.search(r"(?i)favou?rite", m)})
         check(not native_keys, "no native favorites store members", ", ".join(native_keys) or "none", warn=True)
 
@@ -86,6 +96,21 @@ def evaluate(files: dict[str, str]) -> list[tuple[str, str, str]]:
         check('"models"' in search and '"source"' in search and '"error"' in search, "response keys", "models, source, error")
         check('input.get("query"' in search, "query input", 'input.get("query"')
         check('input.get("api_base"' in search, "api_base input", 'input.get("api_base"')
+        check('"default_base"' in search and '"models_list"' in search, "provider default base", "models_list.default_base (discover_models resolves the same base)", warn=True)
+
+    # Local endpoint discovery (api/discover_models.py) reads the stored key and the provider config like the host search.
+    if models is None:
+        check(False, "models.py present", MODELS)
+    else:
+        check(re.search(r"(?m)^def get_api_key\(", models) is not None, "get_api_key", "def get_api_key(service)")
+        lookups = all(token in models for token in ('f"API_KEY_{service.upper()}"', 'f"{service.upper()}_API_KEY"', 'f"{service.upper()}_API_TOKEN"'))
+        check(lookups, "stored key lookups", "API_KEY_<P>, <P>_API_KEY, <P>_API_TOKEN (the v2.11 fallback mirrors them)", warn=True)
+        raw = re.search(r"(?m)^def get_api_key_raw\(", models) is not None
+        check(True, "get_api_key_raw", "present: the first stored key is read without advancing the round robin" if raw else "absent: the dotenv lookups are used")
+    if providers is None:
+        check(False, "helpers/providers.py present", PROVIDERS)
+    else:
+        check(re.search(r"(?m)^def get_provider_config\(", providers) is not None, "get_provider_config", "def get_provider_config(provider_type, provider_id)")
 
     if alpine is not None:
         version = re.search(r'version:"(\d+)\.(\d+)\.(\d+)"', alpine)
@@ -117,7 +142,7 @@ def main(argv: list[str]) -> int:
     failed = False
     for ref in refs:
         sha = upstream.resolve_ref(ref)
-        raw = {path: upstream.fetch_or_none(sha, path) for path in (FIELD, STORE, SEARCH, ALPINE)}
+        raw = {path: upstream.fetch_or_none(sha, path) for path in FILES}
         files = {path: data.decode("utf-8", "replace") for path, data in raw.items() if data is not None}
         print(f"\n== {ref} ({sha[:10]}) ==")
         for status, name, detail in evaluate(files):
