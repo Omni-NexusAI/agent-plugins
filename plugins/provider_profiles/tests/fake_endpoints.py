@@ -103,7 +103,7 @@ class FakeEndpoint:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.load_cert_chain(*tls)
             self.httpd.socket = context.wrap_socket(self.httpd.socket, server_side=True)
-        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread = threading.Thread(target=self.httpd.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True)  # fast shutdown
 
     @property
     def port(self) -> int:
