@@ -444,7 +444,7 @@ export async function install(deps) {
           applyOp({ kind: "touch", type: t, provider: f.provider, apiBase: f.apiBase, name: id });
         }
         if (withFavorites) setTyping(false);
-        if (discovery && typeof id === "string") discovery.afterSelect(discoveryCtx(), id, t, () => scope()?.model);
+        if (discovery && typeof id === "string") discovery.afterSelect(discoveryCtx(), id, t, () => scope()?.model, discoveryCtx);
       }
     }, { capture: true, signal: fieldSignal });
     if (withFavorites) {

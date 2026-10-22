@@ -29,7 +29,8 @@ function withDeadline(promise, ms) {
 
 export function createDiscovery({ merge, api, getSettings }) {
   const requests = new Map(); // key -> { at, ttl, promise }: in-flight sharing plus a short cache
-  const latest = new Map(); // key -> last settled snapshot
+  const latest = new Map(); // key -> last settled snapshot (bounded like requests)
+  const hostSources = new Map(); // key -> "source" of the host's last result (catalog suggestions are marked there)
   const listeners = new Set();
 
   const settings = () => { try { return getSettings() || {}; } catch { return {}; } };
@@ -48,7 +49,6 @@ export function createDiscovery({ merge, api, getSettings }) {
       entries,
       rows,
       byId: merge.indexRows(rows),
-      hostSource: "",
     };
   }
 
@@ -58,18 +58,33 @@ export function createDiscovery({ merge, api, getSettings }) {
     if (hit && Date.now() - hit.at < hit.ttl) return { key, promise: hit.promise };
     const record = { at: Date.now(), ttl: Infinity, promise: null }; // Infinity while in flight: concurrent opens share it
     record.promise = Promise.resolve(api.discover({ provider, apiBase, modelType })).then((response) => {
-      const snapshot = toSnapshot(response);
+      let snapshot;
+      try {
+        snapshot = toSnapshot(response);
+      } catch {
+        snapshot = toSnapshot({ ok: false, unavailable: "bad_response" }); // never leave a rejected promise in the cache
+      }
       record.at = Date.now();
       record.ttl = snapshot.unavailable ? TTL_MS.unavailable : snapshot.error ? TTL_MS.error : snapshot.skipped ? TTL_MS.skipped : TTL_MS.ok;
-      latest.set(key, snapshot);
+      remember(latest, key, snapshot);
       for (const listener of [...listeners]) {
         try { listener(key); } catch { /* a field that went away */ }
       }
       return snapshot;
+    }).catch(() => {
+      record.at = Date.now();
+      record.ttl = TTL_MS.unavailable;
+      return toSnapshot({ ok: false, unavailable: "network" });
     });
     requests.set(key, record);
     while (requests.size > MAX_REQUESTS) requests.delete(requests.keys().next().value);
     return { key, promise: record.promise };
+  }
+
+  function remember(map, key, value) {
+    map.delete(key);
+    map.set(key, value);
+    while (map.size > MAX_REQUESTS) map.delete(map.keys().next().value);
   }
 
   // ------------------------------------------------------------------ store patch
@@ -80,16 +95,16 @@ export function createDiscovery({ merge, api, getSettings }) {
     const wrapper = async function (provider, query, modelType, apiBase, ...rest) {
       if (!active || !enabled() || !provider) return original.call(this, provider, query, modelType, apiBase, ...rest);
       const started = Date.now();
-      const { promise } = request(provider, apiBase, modelType);
+      const { key, promise } = request(provider, apiBase, modelType);
       let host;
       try {
         host = await original.call(this, provider, query, modelType, apiBase, ...rest);
       } catch (error) {
         host = { models: [], provider, source: "error", error: String(error?.message || error) };
       }
+      remember(hostSources, key, host?.source || ""); // known even when discovery answers after the deadline
       const snapshot = await withDeadline(promise, Math.max(0, DEADLINE_MS - (Date.now() - started)));
       if (!snapshot) return host; // too slow: the host result stands; the late answer still fills the cache
-      snapshot.hostSource = host?.source || "";
       try {
         return merge.mergeSearch(host, snapshot, { query, mode: getMode() }).result;
       } catch {
@@ -147,7 +162,8 @@ export function createDiscovery({ merge, api, getSettings }) {
 
   function paint(fc, ctx) {
     const [listBox, emptyBox] = fc.querySelectorAll(":scope > .model-search-results");
-    const snapshot = enabled() ? latest.get(keyFor(ctx.provider, ctx.apiBase, ctx.modelType)) || null : null;
+    const key = keyFor(ctx.provider, ctx.apiBase, ctx.modelType);
+    const snapshot = enabled() ? latest.get(key) || null : null;
     if (listBox) {
       for (const row of listBox.querySelectorAll(ROW)) {
         const id = globalThis.Alpine?.$data?.(row)?.m;
@@ -155,7 +171,7 @@ export function createDiscovery({ merge, api, getSettings }) {
         renderMeta(row, meta ? merge.chipsFor(meta) : []);
       }
       const reason = merge.reasonFor(snapshot);
-      const catalogOnly = Boolean(reason) && snapshot.hostSource === "litellm_registry";
+      const catalogOnly = Boolean(reason) && hostSources.get(key) === "litellm_registry";
       renderNote(listBox, "pp-reason", catalogOnly ? [reason.message, reason.hint].filter(Boolean) : null, { first: true });
       const summary = snapshot && snapshot.rows.length && !reason ? merge.summaryFor(snapshot) : "";
       renderNote(listBox, "pp-endpoint", summary ? [summary] : null);
@@ -172,16 +188,21 @@ export function createDiscovery({ merge, api, getSettings }) {
   }
 
   // ------------------------------------------------------------------ opt-in fill of numbers from the server
-  function afterSelect(ctx, id, slotType, getModel) {
+  function afterSelect(ctx, id, slotType, getModel, getCtx) {
     if (!enabled() || settings().discovery_fill_on_select !== true) return;
     if (slotType !== "chat" && slotType !== "utility") return; // only these slots have a context length
-    const row = latest.get(keyFor(ctx.provider, ctx.apiBase, ctx.modelType))?.byId.get(id);
+    const key = keyFor(ctx.provider, ctx.apiBase, ctx.modelType);
+    const row = latest.get(key)?.byId.get(id);
     if (!row) return;
     const fill = merge.fillFor(row);
     // the host's own click handler (bubble phase) sets the name first
     setTimeout(() => {
       const model = getModel();
       if (!model || model.name !== id) return;
+      try {
+        const now = getCtx();
+        if (keyFor(now.provider, now.apiBase, now.modelType) !== key) return; // the field moved to another server meanwhile
+      } catch { return; }
       if (fill.ctx_length) model.ctx_length = fill.ctx_length;
       if (fill.vision === true && slotType === "chat") model.vision = true;
     }, 0);

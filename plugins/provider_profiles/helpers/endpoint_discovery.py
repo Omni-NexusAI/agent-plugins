@@ -40,6 +40,7 @@ MAX_REQUESTS = 3
 MAX_PINS = 2
 MAX_BYTES = 2 * 1024 * 1024
 CACHE_TTL = 15.0
+REFRESH_MIN_AGE = 1.0  # an explicit refresh cannot hammer a server: younger entries are served
 MAX_CACHE = 64
 PLACEHOLDER_KEYS = {"", "none", "null", "lm-studio", "llama-cpp", "omlx", "vllm", "ollama"}
 PROVIDER_ID = re.compile(r"[a-z0-9_]{1,64}")
@@ -94,6 +95,8 @@ def _error(category: str, display: str = "", provider: str = "", status: int | N
                          "The server is rate limiting requests; try again shortly." if status == 429
                          else "Check the server's log." if not status or status >= 500
                          else "Check the API base URL and whether the server expects https://."),
+        "mixed": (f"{display} resolves to local and public addresses.",
+                  "Discovery only probes hosts whose every address is local: use a name or IP that points only at the local server."),
         "blocked": (f"Discovery will not probe {display}.", "Link-local, cloud-metadata and unspecified addresses are never contacted."),
         "invalid_base": ("The API base URL is not usable for discovery.", "It must be an http(s) URL without credentials, query string or fragment."),
     }
@@ -146,7 +149,7 @@ async def default_resolver(host: str, port: int) -> list[str]:
 
 
 async def classify_host(host: str, port: int, resolver=default_resolver) -> tuple[str, list[str]]:
-    """('local' | 'blocked' | 'public' | 'unresolved', addresses). Only a fully local answer is probed."""
+    """('local' | 'mixed' | 'blocked' | 'public' | 'unresolved', addresses). Only a fully local answer is probed."""
     if _is_ip_literal(host):
         addresses = [host]
     else:
@@ -161,6 +164,8 @@ async def classify_host(host: str, port: int, resolver=default_resolver) -> tupl
         return "blocked", addresses
     if all(c in ("loopback", "private", "cgnat") for c in classes):
         return "local", addresses
+    if any(c in ("loopback", "private", "cgnat") for c in classes):
+        return "mixed", addresses  # a LAN address next to a public one: not probed, but the user is told why
     return "public", addresses
 
 
@@ -471,6 +476,8 @@ async def handle(payload: Any, *, settings: dict, provider_config: Callable[[str
         return _response(skipped="public_host")
     if verdict == "blocked":
         return _failure(_error("blocked", display), display)
+    if verdict == "mixed":
+        return _failure(_error("mixed", display), display)
     if verdict == "unresolved":
         return _failure(_error("dns", display), display)
 
@@ -481,7 +488,8 @@ async def handle(payload: Any, *, settings: dict, provider_config: Callable[[str
     cache_key = _cache_key(base, provider, api_key)
     now = clock()
     cached = _cache.get(cache_key)
-    from_cache = bool(cached) and payload.get("refresh") is not True and now - cached[0] < CACHE_TTL
+    age = now - cached[0] if cached else CACHE_TTL
+    from_cache = bool(cached) and age < (REFRESH_MIN_AGE if payload.get("refresh") is True else CACHE_TTL)
     if from_cache:
         result = cached[1]
     else:

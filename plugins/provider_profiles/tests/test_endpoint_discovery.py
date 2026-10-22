@@ -116,7 +116,7 @@ class AddressPolicy(Base):
 
         verdicts = asyncio.run(go())
         self.assertEqual(verdicts["llm.lan"], ("local", ["10.0.0.5"]))
-        self.assertEqual(verdicts["mixed.lan"][0], "public", "one public address means the host is not probed")
+        self.assertEqual(verdicts["mixed.lan"][0], "mixed", "one public address means the host is not probed")
         self.assertEqual(verdicts["rebind.lan"][0], "blocked", "one metadata address blocks the whole host")
         self.assertEqual(verdicts["empty.lan"][0], "unresolved")
         self.assertEqual(verdicts["down.lan"][0], "unresolved")
@@ -641,12 +641,39 @@ class Cache(Base):
         call(payload, factory=factory, clock=lambda: now[0] + 16)
         self.assertEqual(len(log), 2, "the entry expired after 15 seconds")
 
-    def test_refresh_bypasses_the_cache(self):
+    def test_refresh_bypasses_the_cache_but_is_throttled(self):
         log, factory = self.counting()
+        now = [100.0]
         payload = {"provider": "other", "api_base": "http://10.0.0.5:1/v1"}
-        call(payload, factory=factory)
-        call({**payload, "refresh": True}, factory=factory)
-        self.assertEqual(len(log), 2)
+        call(payload, factory=factory, clock=lambda: now[0])
+        call({**payload, "refresh": True}, factory=factory, clock=lambda: now[0] + 0.2)
+        self.assertEqual(len(log), 1, "a refresh right after a probe is served from the cache")
+        call({**payload, "refresh": True}, factory=factory, clock=lambda: now[0] + 2)
+        self.assertEqual(len(log), 2, "an older entry is probed again")
+
+    def test_scheme_port_and_path_prefix_separate_cache_entries(self):
+        log, factory = self.counting()
+        for base in ("http://10.0.0.5:8443/v1", "https://10.0.0.5:8443/v1", "http://10.0.0.5:8444/v1"):
+            call({"provider": "other", "api_base": base}, factory=factory)
+        self.assertEqual(len(log), 3)
+
+    def test_a_path_prefix_is_probed_and_cached_on_its_own(self):
+        log = []
+
+        def handler(request):
+            return httpx.Response(200, json={"data": [{"id": request.url.path}]}) if request.url.path.endswith("/v1/models") else httpx.Response(404, json={})
+
+        factory = mock_factory(handler, log=log)
+        a = call({"provider": "other", "api_base": "http://10.0.0.5:1/a/v1"}, factory=factory)
+        b = call({"provider": "other", "api_base": "http://10.0.0.5:1/b/v1"}, factory=factory)
+        self.assertEqual((ids(a), ids(b)), (["/a/v1/models"], ["/b/v1/models"]))
+
+    def test_a_host_with_local_and_public_addresses_is_reported_not_probed(self):
+        made = []
+        result = call({"provider": "other", "api_base": "http://dual.lan/v1"}, resolver=resolver_for({"dual.lan": ["192.168.1.10", "93.184.216.34"]}),
+                      factory=mock_factory(models_response, made=made))
+        self.assertEqual(result["error"]["category"], "mixed")
+        self.assertEqual(made, [])
 
     def test_errors_are_never_cached(self):
         state = {"fail": True}

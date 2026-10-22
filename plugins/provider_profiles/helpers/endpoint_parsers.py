@@ -176,7 +176,7 @@ def detect_kind(rows: list, payload: Any = None) -> str:
         return "llama_swap"
     if any(isinstance(r.get("loaded"), bool) for r in dicts):
         return "unsloth"
-    if "strata-router" in owners or any("supports_vision" in r and "context_length" in r for r in dicts):
+    if "strata-router" in owners:
         return "strata_router"
     if "koboldcpp" in owners:
         return "koboldcpp"

@@ -228,6 +228,17 @@ class DiscoveryUiMixin:
         self.assertIn("pp-reason", first)
         self.assertEqual(self.rows(), ["gpt-4o"], "the host's list is untouched")
 
+    def test_a_late_failed_discovery_still_explains_itself_above_catalog_suggestions(self):
+        ep = self.endpoint("openai_generic", token="k1")
+        page = self.open_disc(ep, provider="other", host_models=["gpt-4o"],
+                              setup=lambda s: (setattr(s, "search_source", "litellm_registry"), setattr(s, "discovery_mode", "hang")))
+        self.open_dropdown()
+        page.wait_for_selector(CHAT_ROWS, timeout=6000)
+        self.assertEqual(page.locator("#slot-chat .pp-reason").count(), 0)
+        self.server.state.release.set()
+        page.wait_for_selector("#slot-chat .model-search-results > .pp-reason", state="attached", timeout=8000)
+        self.assertIn("pp-reason", page.evaluate("document.querySelector('#slot-chat .model-search-results').firstElementChild.className"))
+
     def test_discovery_service_down_is_silent(self):
         ep = self.endpoint()
         page = self.open_disc(ep, host_models=HOST_ROUTER, setup=lambda s: setattr(s, "discovery_status", 500))
