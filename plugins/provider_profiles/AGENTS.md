@@ -44,9 +44,17 @@ This is a plugin-local implementation for official Agent Zero. Through 1.0.2 it 
 - Storage is server-side `usr/plugins/provider_profiles/favorites.json` (removed with the plugin), never the plugin `config.json`. Writes are idempotent server-side operations under a lock file (module-level locks are unsafe: the host purges plugin modules), atomic with a `.bak`; corrupt files are quarantined.
 - The favorites UI must not add a second body-wide observer; it mounts per modal (`modal-content-loaded`) and per field.
 
-### Local Discovery (planned, second PR)
+### Local Discovery (second PR, in progress on `feat/provider-profiles-discovery`, stacked on the favorites PR)
 
-- Layers on top of the host `model_search`; never replaces it. Server-side and GET-only, gated on the resolved IP class (loopback, RFC1918, CGNAT allowed; link-local and metadata blocked), no redirects, no query strings, first stored API key only and only sent to private hosts, no model load or unload call ever, llama.cpp `status.args` / `status.preset` never forwarded.
+- **Phase 0 comes first**: `tests/test_core_search_characterization.py` runs the pinned upstream `model_search.py` (v2.11 and v2.14) against fake endpoint servers and records what the host already does (ids only, text filtering, name-based drops, silent failures, auth handling) before any feature is built. Features must close measured gaps only; the host stays the baseline.
+- Layers on top of the host `model_search`; never replaces it or edits its request. Server-side and GET-only (`api/discover_models.py`, `helpers/endpoint_discovery.py`, `helpers/endpoint_parsers.py`).
+- Gate on the **resolved IP class**: loopback, RFC1918 and CGNAT (100.64/10) are probed; link-local and metadata (169.254/16, fe80::/10), unspecified and multicast are refused (`blocked`); public hosts are skipped (`skipped: public_host`, the host search covers cloud providers). The connection is pinned to the checked address.
+- No redirects, no query strings (llama.cpp `?reload=`), http(s) only, 2 MiB response cap, at most 3 requests per call at 4 s each, 15 s TTL cache that never stores errors, `httpx` for TLS parity with the host (this plugin never sets `SSL_CERT_FILE`; private CAs are the operator's environment).
+- API key: the first stored key only (`models.get_api_key_raw` when present, otherwise the same dotenv lookups, because v2.11's `get_api_key` advances the multi-key round robin); `None` and placeholder keys count as no key; sent only to hosts that passed the gate. Unsaved UI keys are never sent (same as the host).
+- Never any model load, unload, `?reload` or autoloading `/props?model=` call; llama.cpp `status.args` / `status.preset` are never forwarded (they can hold `--api-key`); only derived numbers and booleans (context, vision) leave the parser; response bodies never appear in errors.
+- Normalized entries `{id, aliases, state, context{served|max|configured}, vision, kind, quant}` with the state vocabulary `loaded | loading | sleeping | unloaded | downloading | incomplete | downloaded | unknown`; categorized errors `unreachable | tls | unauthorized | forbidden | not_found | bad_payload | timeout | blocked` with fixed messages.
+- UI: runs concurrently with the host search under a 3 s deadline; returns the order-preserving union of ids (router aliases hidden by the host's text or name filter appear); no name-based chat/embedding filtering of local aliases (endpoint-provided type only); chips for state, context and vision; the categorized reason replaces the silent "No models found". Selecting a model never changes context length or vision unless `discovery_fill_on_select` (default false) is on.
+- Flags-off parity now also needs `discovery_enabled: false`: with `favorites_ui: off`, `normal_results_mode: core` and `discovery_enabled: false` no extra request is made and the DOM equals official behavior.
 
 ## Work Guidance
 
