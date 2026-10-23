@@ -16,6 +16,38 @@
       <div class="field-label"><div class="field-title">System 1 coordination</div><div class="field-description">If System 1 is installed, its Main-first default and precedence setting decide when it delegates here.</div></div>
       <div class="field-control"><span role="status">Configured in System 1 settings</span></div>
     </div>
+    <div x-init="config.embedding ??= { recall_attachments: true, recall_limit: 3, recall_threshold: 0.84, recall_media_threshold: 0.95, index_knowledge_media: true, max_media_mb: 20, timeout_seconds: 60, models: {} }">
+      <div class="section-title">Media embedding</div>
+      <div class="section-description">Applies when a preset's Embedding model has Image, Audio or Video input switched on in Agent settings → Models.</div>
+      <div class="field">
+        <div class="field-label"><div class="field-title">Recall from attachments</div><div class="field-description">Finds memories similar to images, audio or video attached to a message.</div></div>
+        <div class="field-control"><label class="toggle"><input type="checkbox" x-model="config.embedding.recall_attachments" /><span class="toggler"></span></label></div>
+      </div>
+      <div class="field">
+        <div class="field-label"><div class="field-title">Attachment recall results</div><div class="field-description">Most memories added per attachment.</div></div>
+        <div class="field-control"><input type="number" min="1" max="20" x-model.number="config.embedding.recall_limit" /></div>
+      </div>
+      <div class="field">
+        <div class="field-label"><div class="field-title">Match threshold for text memories</div><div class="field-description">Similarity from 0 to 1 on Agent Zero's memory scale when media is compared with text memories. 0.84 suits EmbeddingGemma 2; check other models.</div></div>
+        <div class="field-control"><input type="number" min="0" max="1" step="0.01" x-model.number="config.embedding.recall_threshold" /></div>
+      </div>
+      <div class="field">
+        <div class="field-label"><div class="field-title">Match threshold for media memories</div><div class="field-description">Media compared with other saved media scores much higher, so it needs its own threshold. 0.95 suits EmbeddingGemma 2.</div></div>
+        <div class="field-control"><input type="number" min="0" max="1" step="0.01" x-model.number="config.embedding.recall_media_threshold" /></div>
+      </div>
+      <div class="field">
+        <div class="field-label"><div class="field-title">Index knowledge media</div><div class="field-description">Adds media files in knowledge folders to memory with the media embedding.</div></div>
+        <div class="field-control"><label class="toggle"><input type="checkbox" x-model="config.embedding.index_knowledge_media" /><span class="toggler"></span></label></div>
+      </div>
+      <div class="field">
+        <div class="field-label"><div class="field-title">Largest media file, MB</div><div class="field-description">Larger files are refused before upload to the embedding server.</div></div>
+        <div class="field-control"><input type="number" min="1" max="200" x-model.number="config.embedding.max_media_mb" /></div>
+      </div>
+      <div class="field">
+        <div class="field-label"><div class="field-title">Media embedding timeout, seconds</div><div class="field-description">Video can take longer than images.</div></div>
+        <div class="field-control"><input type="number" min="5" max="600" x-model.number="config.embedding.timeout_seconds" /></div>
+      </div>
+    </div>
   </div>
 </body>
 </html>

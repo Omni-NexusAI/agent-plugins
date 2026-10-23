@@ -109,6 +109,7 @@
     if (section.querySelector(':scope > .auxiliary-roles-inline')) return;
     const title = (section.querySelector(':scope > .section-title') ||
       section.querySelector(':scope > .preset-model-heading > .section-title'))?.textContent?.trim();
+    if (title === 'Embedding Model') return mountEmbedding(section);
     if (title !== 'Main Model') return;
     const root = document.createElement('div'); root.className = 'auxiliary-roles-inline';
     root.setAttribute('aria-busy', 'true');
@@ -172,6 +173,84 @@
       }
       status.textContent = ''; root.append(status); root.removeAttribute('aria-busy');
     } catch { status.textContent = 'Auxiliary roles settings unavailable'; root.removeAttribute('aria-busy'); }
+  }
+
+  const media = [
+    ['image', 'Image', 'Pictures and screenshots.'],
+    ['audio', 'Audio', 'WAV, MP3 or FLAC recordings.'],
+    ['video', 'Video', 'Video files; the server decodes frames and sound.']
+  ];
+
+  function presetModel(section) {
+    const holder = section.querySelector(':scope > [x-data]');
+    try { return JSON.parse(JSON.stringify(globalThis.Alpine?.$data?.(holder)?.model || {})); } catch { return {}; }
+  }
+
+  async function mountEmbedding(section) {
+    const root = document.createElement('div'); root.className = 'auxiliary-roles-inline aux-embedding-media';
+    const status = document.createElement('div'); status.className = 'field-description';
+    status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
+    status.textContent = 'Loading media input…'; root.append(status); section.append(root);
+    try { await load(); } catch { status.textContent = 'Media input settings unavailable'; return; }
+    if (!root.isConnected) return;
+    const embedding = settings.embedding || (settings.embedding = {});
+    const models = embedding.models || (embedding.models = {});
+    const body = document.createElement('div'); root.replaceChildren(body, status);
+    let shownKey = null;
+    function render(force = false) {
+      const model = presetModel(section);
+      const key = model.provider && model.name ? `${String(model.provider).trim().toLowerCase()}/${String(model.name).trim()}` : '';
+      if (!force && key === shownKey) return;
+      shownKey = key; body.replaceChildren();
+      const note = document.createElement('span');
+      body.append(field('Media input',
+        'Lets this embedding model turn images, audio and video into vectors for memory and knowledge search. ' +
+        'Only for models that accept them, such as EmbeddingGemma 2 on llama.cpp with its projector (--mmproj).', note));
+      if (!key) { note.textContent = 'Choose a provider and model first'; return; }
+      const entry = models[key] || {};
+      for (const [kind, label, description] of media) {
+        const toggle = document.createElement('input'); toggle.type = 'checkbox'; toggle.checked = entry[kind] === true;
+        toggle.dataset.kind = kind; toggle.setAttribute('aria-label', `${label} input`);
+        const switchLabel = document.createElement('label'); switchLabel.className = 'toggle';
+        const indicator = document.createElement('span'); indicator.className = 'toggler'; switchLabel.append(toggle, indicator);
+        toggle.addEventListener('change', () => {
+          const current = models[key] || (models[key] = {});
+          current[kind] = toggle.checked; save(status);
+        });
+        body.append(field(`${label} input`, description, switchLabel));
+      }
+      const check = document.createElement('button'); check.type = 'button'; check.className = 'btn btn-field';
+      check.textContent = 'Check server';
+      const report = document.createElement('div'); report.className = 'field-description aux-embedding-report';
+      const checkHolder = document.createElement('div'); checkHolder.append(check, report);
+      check.addEventListener('click', async () => {
+        check.disabled = true; report.textContent = 'Sending one short sample of each kind…';
+        const model = presetModel(section);   // the draft as it is now: the API base may have changed since render
+        try {
+          const result = await api('/plugins/auxiliary_model_roles/embedding_media', {
+            action: 'probe', provider: model.provider, name: model.name, api_base: model.api_base || '',
+            kwargs: model.kwargs || {}, modalities: media.map(([kind]) => kind)
+          });
+          if (!result.ok) { report.textContent = result.error || result.results?.text?.error || 'The server did not return a text embedding'; return; }
+          const current = models[key] || (models[key] = {});
+          const lines = [`Text: ${result.results.text.dims} dimensions`];
+          for (const [kind, label] of media) {
+            const outcome = result.results[kind] || {};
+            current[kind] = !!outcome.ok;
+            lines.push(outcome.ok ? `${label}: accepted` : `${label}: not accepted (${outcome.error || 'no result'})`);
+          }
+          body.querySelectorAll('input[data-kind]').forEach(toggle => { toggle.checked = current[toggle.dataset.kind] === true; });
+          report.textContent = lines.join(' · '); save(status);
+        } catch { report.textContent = 'Check server failed'; }
+        finally { check.disabled = false; }
+      });
+      body.append(field('Check server', 'Sends one tiny image, a one-second tone and a one-second test video, then sets the switches to what the server accepted.', checkHolder));
+    }
+    const refresh = () => setTimeout(() => render(), 0);
+    ['input', 'change', 'click'].forEach(type => section.addEventListener(type, event => {
+      if (!root.contains(event.target)) refresh();
+    }));
+    render(true); status.textContent = '';
   }
 
   function scan() { document.querySelectorAll('.model-section, .preset-model-section').forEach(mount); }
