@@ -15,3 +15,12 @@ coding:
 policy:
   timeout_seconds: 90
   max_goal_chars: 8000
+embedding:
+  models: {}
+  max_media_mb: 20
+  timeout_seconds: 60
+  recall_attachments: true
+  recall_limit: 3
+  recall_threshold: 0.84
+  recall_media_threshold: 0.95
+  index_knowledge_media: true
