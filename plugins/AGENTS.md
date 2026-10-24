@@ -39,6 +39,9 @@
 
 ## Child DOX Index
 
+- `a2a_format_unifier/AGENTS.md`: assembled Agent Zero tool and guarded native
+  A2A binding; editable source lives under `portable/a2a_format_unifier/`.
+
 - `browser_session_sync/AGENTS.md`: plugin-owned browser session restore, current-state tracking, manual recovery, and performance safeguards.
 - `_agentspine_identity/AGENTS.md`: Agentspine product identity overlay, greeting, banner, title, and version display.
 - `_enhanced_mcp_config/AGENTS.md`: MCP settings UI, disabled flag handling, status/apply/toggle API handlers, and override payload copied from the GPU-pre container.

@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "plugins": [
+    {"id": "a2a_format_unifier", "source": "plugins/a2a_format_unifier", "frameworks": ["Agent Zero"], "status": "development", "distribution_repository": null},
     {"id": "_agentspine_identity", "source": "plugins/_agentspine_identity", "frameworks": ["Agentspine"], "status": "active", "distribution_repository": null},
     {"id": "_enhanced_mcp_config", "source": "plugins/_enhanced_mcp_config", "frameworks": ["Agentspine (historical snapshot)"], "status": "historical", "distribution_repository": null},
     {"id": "_enhanced_speech", "source": "plugins/_enhanced_speech", "frameworks": ["Agent Zero", "Agentspine"], "status": "active", "distribution_repository": null},
