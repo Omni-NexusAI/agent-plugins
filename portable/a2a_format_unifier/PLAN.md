@@ -15,3 +15,12 @@ Do not claim universal future-version compatibility or an unverified direction.
 
 Publish through a draft PR; keep runtime state, credentials, and caches out of
 source. Add packaging instructions, owning DOX, catalog entry, and evidence.
+
+## Implemented
+
+The portable core, Agent Zero adapter, self-contained distribution, catalog,
+installation guide, and verification record are present. Nineteen isolated
+checks pass on Windows and Linux. Native outbound reply/continuation passed;
+reverse submission and GetTask conversion passed, but completion exceeded the
+90-second wait during Agent Zero's knowledge-store initialization. No Hermes
+plugin was installed. See `VERIFICATION.md` for the evidence boundaries.

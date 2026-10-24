@@ -40,9 +40,17 @@ version 0.2.5, and the installed Windows Hermes A2A 1.0 gateway.
   task immediately, ignores blocking configuration, and stores final text in
   history with a naive local timestamp. The inbound wrapper now handles those
   specific behaviors; the regression passes in both isolated test runs.
-- Final native reverse reply verification is pending the existing Time Travel
-  watcher startup. No Hermes adapter was installed, and no unrelated integration
-  was changed to accelerate startup.
+- After the existing Time Travel watcher finished, native Hermes `a2a_call`
+  successfully submitted a task through the installed adapter. Agent Zero
+  began its knowledge-store initialization but did not finish the task within
+  the adapter's 90-second completion window; the call returned HTTP 504.
+- A subsequent native Hermes HTTP `GetTask` request retrieved that same task
+  with `TASK_STATE_SUBMITTED`, verifying reverse request/reply format conversion
+  without repeating the send. No completed agent reply was observed. An
+  unauthenticated native request still returned HTTP 401.
+- No Hermes adapter was installed, and no unrelated integration was changed to
+  accelerate startup. The reverse direction is accepted and pollable, but a
+  completed reverse conversation remains unverified.
 
 ## Limits of this evidence
 
