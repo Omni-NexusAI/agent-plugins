@@ -13,6 +13,8 @@ def install():
         raise RuntimeError("Unsupported Agent Zero A2A server interface")
 
     async def unified(self, scope, receive, send):
+        if not LegacyServerUnifier.supports_scope(scope):
+            return await original(self, scope, receive, send)
         from helpers.plugins import get_enabled_plugins, get_plugin_config
         if "a2a_format_unifier" not in get_enabled_plugins(None):
             return await original(self, scope, receive, send)

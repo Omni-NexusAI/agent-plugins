@@ -1,0 +1,6 @@
+/.private/
+/.runtime/
+/config.json
+/.toggle-*
+__pycache__/
+*.pyc

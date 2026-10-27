@@ -12,7 +12,10 @@ def sources():
     result = {}
     adapter = ROOT / "adapters" / "agent_zero"
     for source in adapter.rglob("*"):
-        if source.is_file() and "__pycache__" not in source.parts:
+        relative = source.relative_to(adapter)
+        private = any(part in (".private", ".runtime", "__pycache__") for part in relative.parts)
+        private = private or source.name == "config.json" or source.name.startswith(".toggle-") or source.suffix == ".pyc"
+        if source.is_file() and not private:
             result[source.relative_to(adapter)] = source
     for source in (ROOT / "core").glob("*.py"):
         result[Path("helpers") / source.name] = source

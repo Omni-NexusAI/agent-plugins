@@ -22,12 +22,32 @@ class LegacyServerUnifier:
         self.poll_interval = poll_interval
         self.legacy_timezone = legacy_timezone
 
-    async def __call__(self, scope, receive, send):
+    @staticmethod
+    def supports_scope(scope):
+        """Opt in only for the modern card alias or explicit v1 requests."""
         if scope.get("type") != "http":
+            return False
+        if scope.get("method") == "GET":
+            return scope.get("path", "").endswith("/.well-known/agent-card.json")
+        if scope.get("method") == "POST":
+            headers = {k.lower(): v for k, v in scope.get("headers", [])}
+            version = headers.get(b"a2a-version", b"")
+            return version == b"1.0" or version.startswith(b"1.0.")
+        return False
+
+    async def __call__(self, scope, receive, send):
+        if not self.supports_scope(scope):
             return await self.app(scope, receive, send)
         path = scope.get("path", "")
-        card = scope.get("method") == "GET" and path.endswith((
-            "/.well-known/agent.json", "/.well-known/agent-card.json"))
+        card = scope.get("method") == "GET"
+        response_scope = scope
+        if card:
+            # The legacy URL and its card remain entirely native. Only the
+            # modern alias opts in to reachable-origin correction.
+            scope = dict(scope)
+            scope["path"] = path.removesuffix("agent-card.json") + "agent.json"
+            if scope.get("raw_path"):
+                scope["raw_path"] = scope["path"].encode()
         method = None
         request_id = None
         if scope.get("method") == "POST":
@@ -125,7 +145,7 @@ class LegacyServerUnifier:
             try:
                 response = json.loads(output)
                 if card:
-                    endpoint = self._endpoint(scope)
+                    endpoint = self._endpoint(response_scope)
                     if endpoint:
                         response["url"] = endpoint
                 elif isinstance(response, dict) and "result" in response:

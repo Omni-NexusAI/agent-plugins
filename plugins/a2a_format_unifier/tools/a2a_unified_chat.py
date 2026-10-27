@@ -1,11 +1,11 @@
 """Agent Zero adapter for the framework-independent A2A Format Unifier."""
 import asyncio
-import os
 from pathlib import Path
 
 from helpers.plugins import get_plugin_config
 from helpers.tool import Tool, Response
 from usr.plugins.a2a_format_unifier.helpers.client import Client, A2AError, converse_persisted
+from usr.plugins.a2a_format_unifier.helpers.credentials import resolve_credential
 
 
 class A2AUnifiedChat(Tool):
@@ -25,10 +25,11 @@ class A2AUnifiedChat(Tool):
             return Response(message="Unknown configured A2A peer alias", break_loop=False)
         entry = peers[peer]
         try:
-            credential = os.getenv(entry["token_env"], "") if entry.get("token_env") else None
+            plugin_root = Path(__file__).resolve().parents[1]
+            credential = resolve_credential(entry, plugin_root)
             client = Client(entry.get("url", ""), credential,
                             config.get("timeout", 180))
-            root = Path(__file__).resolve().parents[1] / ".runtime"
+            root = plugin_root / ".runtime"
             result = await asyncio.to_thread(converse_persisted, client, message, root, reset)
             return Response(message=result["text"], break_loop=False)
         except A2AError as exc:

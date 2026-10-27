@@ -3,5 +3,5 @@ inbound_compatibility: true
 peers:
   hermes:
     url: http://host.docker.internal:9900/
-    token_env: A2A_TOKEN
+    token_file: .private/hermes.token
 routes: {}

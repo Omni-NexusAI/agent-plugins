@@ -18,6 +18,11 @@ source. Add packaging instructions, owning DOX, catalog entry, and evidence.
 
 ## Implemented
 
+Version 0.1.1 adds strict containment: native traffic bypass, plugin-private
+credentials, no native prompt override, explicit broker aliases, disabled-state
+preservation, and 26 passing checks. The authorized native laptop ping completed
+with the plugin disabled. The prior 0.1.0 result below is historical.
+
 The portable core, Agent Zero adapter, self-contained distribution, catalog,
 installation guide, and verification record are present. Nineteen isolated
 checks pass on Windows and Linux. Native outbound reply/continuation passed;

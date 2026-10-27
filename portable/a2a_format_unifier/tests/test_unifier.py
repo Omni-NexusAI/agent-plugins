@@ -11,6 +11,7 @@ from a2a_format_unifier.helpers.formats import (
     normalize_result, encode_result, encode_message)
 from a2a_format_unifier.helpers.client import Client, A2AError, converse_persisted, payload
 from a2a_format_unifier.helpers.middleware import LegacyServerUnifier
+from a2a_format_unifier.helpers.credentials import resolve_credential
 
 
 def completed(ctx="same", text="reply", version="1.0"):
@@ -148,21 +149,24 @@ class ClientTests(unittest.TestCase):
 
 
 class MiddlewareTests(unittest.IsolatedAsyncioTestCase):
-    async def request(self, body=None, status=200, card=False, rejected=False):
+    async def request(self, body=None, status=200, card=False, rejected=False, modern_card=True):
         seen = {}
         response = {"protocolVersion": "0.2.5", "url": "http://localhost:8000"} if card else completed(version="0.3")
         native_body = b'{"error":"unauthorized"}' if rejected else json.dumps(response).encode()
 
         async def app(scope, receive, send):
             seen["headers"] = scope.get("headers", [])
+            seen["path"] = scope.get("path")
             if body is not None:
                 seen["request"] = json.loads((await receive())["body"])
             await send({"type": "http.response.start", "status": status, "headers": [(b"content-type", b"application/json")]})
             await send({"type": "http.response.body", "body": native_body})
 
         scope = {"type": "http", "method": "GET" if card else "POST", "scheme": "http",
-                 "path": "/a2a/t-test/.well-known/agent.json" if card else "/a2a/t-test/",
+                 "path": ("/a2a/t-test/.well-known/agent-card.json" if modern_card else "/a2a/t-test/.well-known/agent.json") if card else "/a2a/t-test/",
                  "root_path": "/a2a", "headers": [(b"host", b"peer.test:18081"), (b"authorization", b"Bearer test")]}
+        if body and body.get("method") in LegacyServerUnifier.METHODS:
+            scope["headers"].append((b"a2a-version", b"1.0"))
         async def receive():
             return {"type": "http.request", "body": json.dumps(body).encode(), "more_body": False}
         sent = []
@@ -194,9 +198,27 @@ class MiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, completed(version="0.3"))
 
     async def test_card_origin_preserves_path_without_duplicate_mount(self):
-        _, _, result = await self.request(card=True)
+        seen, _, result = await self.request(card=True)
+        self.assertEqual(seen["path"], "/a2a/t-test/.well-known/agent.json")
         self.assertEqual(result["url"], "http://peer.test:18081/a2a/t-test/")
         self.assertEqual(result["protocolVersion"], "0.2.5")
+
+    async def test_native_card_is_completely_unchanged(self):
+        seen, _, result = await self.request(card=True, modern_card=False)
+        self.assertEqual(result, {"protocolVersion": "0.2.5", "url": "http://localhost:8000"})
+        self.assertEqual(seen["path"], "/a2a/t-test/.well-known/agent.json")
+
+    async def test_native_large_body_bypasses_unifier_size_limit(self):
+        body = {"method": "message/send", "params": {"message": {"kind": "message", "role": "user", "parts": [{"kind": "text", "text": "x" * (LegacyServerUnifier.LIMIT + 1)}]}}}
+        seen, start, _ = await self.request(body)
+        self.assertEqual(start["status"], 200)
+        self.assertEqual(seen["request"], body)
+
+    def test_scope_opt_in_is_modern_only(self):
+        native = {"type": "http", "method": "POST", "path": "/a2a/", "headers": []}
+        self.assertFalse(LegacyServerUnifier.supports_scope(native))
+        self.assertTrue(LegacyServerUnifier.supports_scope({**native, "headers": [(b"a2a-version", b"1.0")]}))
+        self.assertFalse(LegacyServerUnifier.supports_scope({**native, "headers": [(b"a2a-version", b"0.3")]}))
 
     async def test_pending_native_task_polled_once_without_resending(self):
         methods = []
@@ -214,11 +236,36 @@ class MiddlewareTests(unittest.IsolatedAsyncioTestCase):
         sent = []
         async def send(event):
             sent.append(event)
-        await LegacyServerUnifier(app, poll_interval=0, legacy_timezone=timezone.utc)({"type": "http", "method": "POST", "path": "/a2a/t-test/"}, receive, send)
+        await LegacyServerUnifier(app, poll_interval=0, legacy_timezone=timezone.utc)({"type": "http", "method": "POST", "path": "/a2a/t-test/", "headers": [(b"a2a-version", b"1.0")]}, receive, send)
         self.assertEqual(methods, ["message/send", "tasks/get"])
         task = json.loads(sent[1]["body"])["result"]["task"]
         self.assertEqual(task["status"]["message"]["parts"][0]["text"], "answer")
         self.assertEqual(task["status"]["timestamp"], "2026-10-24T06:00:00.000Z")
+
+
+class CredentialTests(unittest.TestCase):
+    def test_plugin_private_credential(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".private").mkdir()
+            (root / ".private" / "peer.token").write_text("fixture-only-credential\n")
+            self.assertEqual(resolve_credential({"token_file": ".private/peer.token"}, root), "fixture-only-credential")
+
+    def test_shared_native_environment_is_reserved(self):
+        with self.assertRaisesRegex(A2AError, "reserved"):
+            resolve_credential({"token_env": "A2A_TOKEN"}, Path("."))
+
+    def test_missing_conflicting_or_outside_credentials_fail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for entry in ({"token_file": "../outside"}, {"token_file": "/etc/passwd"},
+                          {"token_file": ".private/no.token"},
+                          {"token_file": ".private/x.token", "token_env": "DEDICATED_TEST"}):
+                with self.assertRaises(A2AError):
+                    resolve_credential(entry, root)
+
+    def test_public_peer_has_no_credential(self):
+        self.assertIsNone(resolve_credential({}, Path(".")))
 
 
 if __name__ == "__main__":

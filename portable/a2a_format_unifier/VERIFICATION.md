@@ -1,5 +1,47 @@
 # Verification record
 
+## 0.1.1 containment correction - October 26, 2026
+
+- 26 isolated checks passed on Windows Python 3.14 and Linux Python 3.12.
+  New regressions cover native card preservation, native large-body bypass,
+  explicit modern scope, plugin-private credentials, outside-path rejection,
+  and refusal to consume the native A2A_TOKEN variable.
+- Native legacy traffic now bypasses before body reads and plugin-config checks.
+  Only explicit v1 POST requests and the modern card alias opt in.
+- The approved local migration backed up and removed the manual agent-profile
+  prompt override, restored the pre-install absence of the shared A2A_TOKEN
+  entry, and moved the Hermes credential to plugin-private storage.
+- Broker aliases now carry a Hermes prefix. The misleading LaptopA0-to-Hermes
+  route was removed; this does not create or rename a native A0 registry entry.
+- The user's disabled-plugin state was restored after Agent Zero had
+  independently re-enabled it in the troubleshooting conversation. One UI
+  process reload was performed; no native A2A source file was edited.
+- A user-authorized live native desktop-to-laptop Agent Zero ping used the
+  original connect_to_agent client and native response extractor. The laptop
+  accepted the task, completed it, and returned the expected NATIVE_A0_READY
+  marker while the unifier remained disabled. This is actual generated-reply
+  evidence for that request/response direction, not just a card check.
+- Shared core and assembled distribution match; catalog preview validates
+  15 package files. The prior 0.1.0 evidence below is historical.
+
+### Separate greeting-loop observation
+
+The Laptop renaming transcript retained a startup Hello topic and the correct
+rename request. Its first task call understood the rename, then subsequent
+DeepSeek chat-completions turns answered the older greeting. After a stop/nudge
+and a user model change, GLM resumed the rename. The earlier A2A investigation
+loop also used DeepSeek. These are observations and a correlation, not proof
+of a specific model/provider fault. No stored Responses continuation was used,
+and no A2A request produced the greeting steps. The containment repair addresses
+the demonstrated disabled-tool/routing interference; it does not claim to
+resolve the greeting behavior's exact cause.
+An offline replay through the installed history serializer and model-message
+converter preserved the rename request and correct role alternation before all
+four incorrect greeting turns. No provider request was made for that check;
+the exact wire requests from the historical failing turns were not captured.
+
+## Historical 0.1.0 evidence
+
 Date: 2026-10-24. Development version: 0.1.0.
 
 ## Automated and packaging evidence
