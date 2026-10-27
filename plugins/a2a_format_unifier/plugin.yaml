@@ -1,0 +1,8 @@
+name: a2a_format_unifier
+title: A2A Format Unifier
+description: Native-first A2A reply-format fallback for incompatible cross-framework peers. No chat tool, routing aliases, or preferred peer.
+version: 0.2.0
+always_enabled: false
+settings_sections: []
+per_project_config: false
+per_agent_config: false

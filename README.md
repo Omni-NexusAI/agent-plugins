@@ -16,6 +16,7 @@ been verified.
 
 | Plugin | Framework | Status |
 | --- | --- | --- |
+| [`a2a_format_unifier`](plugins/a2a_format_unifier/) | Agent Zero | Development; shared [portable core](portable/a2a_format_unifier/) and native adapter |
 | [`_agentspine_identity`](plugins/_agentspine_identity/) | Agentspine | Active |
 | [`_multi_source_updater`](plugins/_multi_source_updater/) | Agentspine | Active |
 | Auxiliary model roles | Agent Zero | Planned; no package yet |
@@ -33,7 +34,8 @@ been verified.
 | System 1 | Multiple frameworks planned, starting with Agent Zero | Planned; no package yet |
 
 The existing packages listed for both frameworks use Agent Zero-style packaging;
-they do not yet use the planned shared `portable/` core and adapters. A planned
+they do not yet use a shared `portable/` core and adapters. A2A Format Unifier
+uses that layout with only Agent Zero integrated so far. A planned
 entry is an architectural direction, not an installable plugin.
 
 The [source sync record](CONTAINER_SYNC.md) describes the origins and
@@ -46,7 +48,7 @@ part of this monorepo.
 - `plugins/<id>/` contains existing self-contained Agent Zero-style packages.
   Install a compatible package by copying its folder into the host's plugin
   directory, preserving its folder name.
-- [`portable/`](portable/) is for future plugin sources with shared `core/`
+- [`portable/`](portable/) contains plugin sources with shared `core/`
   logic and framework-specific `adapters/<framework>/` code. An adapter's
   distribution must include the shared code it needs. The monorepo is never a
   runtime dependency of an installed package.
