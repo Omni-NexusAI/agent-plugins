@@ -10,7 +10,8 @@ frameworks can bind the core without duplicating its wire-format decisions.
 - `core/formats.py`: non-mutating normalization and encoding for known wire profiles.
 - `core/client.py`: bounded standard-library JSON-RPC client and persistent context.
 - `core/middleware.py`: ASGI legacy-server request/response conversion, no host imports.
-- `adapters/agent_zero/`: native tool, config, prompts, guarded startup binding, docs.
+- `core/fallback.py`: reply-only conversion after native validation fails; no peer selection.
+- `adapters/agent_zero/`: config, exact endpoint credentials, guarded native-client/server bindings, docs. No chat tool or routing aliases.
 - `tests/`: regression fixtures and fake transport/ASGI tests.
 - `build.py`: deterministic assembly; includes core in `helpers/` and repository license.
 

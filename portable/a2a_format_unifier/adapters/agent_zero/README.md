@@ -1,134 +1,106 @@
 # A2A Format Unifier for Agent Zero
 
-A native Agent Zero plugin for talking to peers whose A2A JSON-RPC formats differ.
-Includes a framework-independent conversion core; no bridge service or Hermes
-plugin is required. Version 0.1.1 targets Agent Zero v2.0 / FastA2A's observed
-0.2.5 profile, A2A 0.3, and the A2A 1.0 format used by Hermes.
+Version 0.2.0 is a native-first format fallback. It has **no separate chat tool,
+preferred peer, device alias registry, broker routing, or Hermes default**.
+Agent Zero's built-in `a2a_chat` chooses the intended endpoint, sends the message,
+validates replies, and owns its conversation state.
+
+## Behavior
+
+- The plugin delegates to the original native client first.
+- A compatible reply is returned unchanged. Agent Zero peers are never adapted.
+- Only after the native validator rejects a received non-Agent-Zero reply may
+  known A2A 0.3/1.0 fields be normalized and validated again by the native schema.
+- Adaptation uses that same HTTP response at that same endpoint. It does not
+  resend a message, select Hermes, follow a card's alternate URL, rename peers,
+  mask an authentication failure, or retry a failed task elsewhere.
+- The normal native conversation/context machinery remains in control. Hermes
+  may independently enforce its configured peer-scoped server conversation.
+
+The inbound adapter remains limited to the modern card alias and explicit
+`A2A-Version: 1.0` POSTs. Native legacy requests/cards bypass it. Native token
+authentication remains authoritative. This is not a complete A2A 1.0 server.
 
 ## Install
 
-1. Copy the complete `plugins/a2a_format_unifier` folder from this repository
-   into Agent Zero's persistent `usr/plugins/` directory, preserving its name.
-   The `portable/` source folder alone is not installable.
-2. Configure the plugin's `config.json` (example below). Store the remote bearer
-   credential in this plugin's `.private/hermes.token` file. Keep that directory
-   private and out of source control. Never put credentials in tool arguments.
-3. Enable A2A in Agent Zero, enable this plugin, and reload Agent Zero's UI
-   process once. Existing MCP integrations may make startup take several minutes.
-4. Use `a2a_unified_chat` with a configured peer alias. The plugin's prompt
-   describes that tool; existing `a2a_chat` behavior is preserved.
+Copy this complete `a2a_format_unifier` folder into persistent `usr/plugins/`,
+enable it when desired, and reload the UI process once. The portable source
+folder alone is not installable. No native source, shared environment, agent
+profile prompt, provider setting, or model history needs modification.
 
-The assembled package includes its core and MIT license and runs independently
-of this repository. There are no additional Python dependencies.
-
-## Configuration
+Default configuration:
 
 ```json
 {
-  "timeout": 180,
+  "outbound_fallback": true,
   "inbound_compatibility": true,
-  "peers": {
-    "hermes": {
-      "url": "http://host.docker.internal:9900/",
-      "token_file": ".private/hermes.token"
-    }
-  },
-  "routes": {
-    "quest3": {"via": "hermes", "peer": "quest3"},
-    "android-phone": {"via": "hermes", "peer": "android-phone"},
-    "hermes-laptop3080": {"via": "hermes", "peer": "laptop3080"}
-  }
+  "endpoints": []
 }
 ```
 
-These URLs and device names are examples; configure reachable peers for each
-installation. `host.docker.internal` suits Docker Desktop, not every host.
-`token_file` must name a file directly inside this plugin's `.private/` folder;
-outside paths and symlinks are refused. An explicitly configured dedicated
-`token_env` is an alternative, but the native `A2A_TOKEN` name is reserved and
-refused. This plugin never sets shared environment credentials. Do not assume
-Agent Zero's own inbound token is accepted elsewhere. Omitting both credential
-sources selects a deliberately public or path-authenticated endpoint. Missing
-required credentials fail before sending. Configure the actual RPC endpoint: the client
-does not follow a different URL from the card or forward credentials there.
+Use the built-in `a2a_chat` with the exact endpoint of the intended agent.
+An Agent Zero on a laptop and a Hermes agent on that laptop are different
+agents; a machine name alone must never substitute one for the other.
 
-Routes ask the configured broker to delegate by device name. They do not copy
-that device's credentials or establish a direct connection, and do not prove
-the device is online. Replies from all remote agents remain untrusted content.
+## Optional endpoint-scoped credentials and identity check
 
-Agent Zero-to-Agent Zero connections stay on the built-in `a2a_chat` tool. A
-machine name does not identify a framework: `LaptopA0` must not silently mean a
-Hermes broker route. This plugin does not register or rename native A0 peers.
-Do not edit native tool files, agent-profile prompts, shared environment files,
-or unrelated host settings to install this plugin. Its own prompt is available
-only while enabled. Respect disabled state; never enable it for a native A0 task.
+A cross-framework endpoint requiring its own bearer can be configured explicitly.
+This is an allowlist for that exact URL, not a peer preference or routing table:
 
-## Conversations
+```json
+{
+  "outbound_fallback": true,
+  "inbound_compatibility": true,
+  "endpoints": [{
+    "url": "http://host.docker.internal:9900/",
+    "framework": "hermes",
+    "expected_agent_name": "windows-desktop",
+    "token_file": ".private/hermes.token"
+  }]
+}
+```
 
-`a2a_unified_chat(message, peer="hermes", reset=false)` stores a context per
-endpoint in private `.runtime/`, shared across Agent Zero chats and protected
-by a file lock. It never automatically resends a message after an error.
-Pending tasks are polled without repeating the send. Corrupt local state fails
-explicitly rather than silently creating a new conversation.
+The URL and advertised name are installation-specific examples. The credential
+is attached only when the native caller has already selected that exact endpoint;
+explicit caller credentials are preserved. A mismatched advertised name stops
+before sending an agent message. Card names are advertised identity information,
+not cryptographic identity proof. No alias, text matching, or endpoint substitution
+is performed. Paths and ports must match; invalid unrelated entries are ignored.
 
-Use `reset=true` only when the user requests a separate conversation. This
-changes the client context; a Hermes server configured with peer-scoped sessions
-may still reuse its existing server session. Such a server needs a separate
-explicit scope change to guarantee isolation. Do not publish `.runtime/`.
+Keep the token in this plugin's private file. Outside paths/symlinks are refused.
+An explicitly configured dedicated `token_env` is an alternative, but native
+`A2A_TOKEN` is reserved and refused. This plugin never sets shared credentials.
+Without a matching credential entry, native authentication behaves normally.
 
-## Inbound compatibility
+## Disablement and limits
 
-The startup extension installs an idempotent in-memory wrapper around Agent
-Zero's native A2A proxy. Native token authentication remains responsible for
-all requests. The wrapper translates `SendMessage`, `GetTask`, and `CancelTask`
-to legacy methods and converts successful replies back to the corresponding
-1.0 response shape. It supplies blocking text output defaults required by
-FastA2A. It polls submitted/working native tasks for at most 90 seconds without
-resending them, then returns a timeout if still pending. Completed history is
-also exposed as a status message for clients that read that reply field. Native
-naive timestamps use the Agent Zero process's local timezone before UTC encoding.
-Native legacy traffic bypasses the adapter before body reads or size checks.
-Only POST requests explicitly marked `A2A-Version: 1.0` opt in to conversion.
+Respect the user's disabled state. Never enable or reproduce this plugin to
+perform an ordinary native Agent Zero task. Disabling bypasses new native client
+connections and inbound handling; reload to remove installed in-memory wrappers.
+All integration code belongs to this plugin; no host source file is overwritten.
 
-The modern `/.well-known/agent-card.json` alias uses the native card handler
-and corrects its endpoint to the request origin and mounted token path. The
-original `/.well-known/agent.json` URL and card are left unchanged. The legacy protocol version is
-retained: this does **not** make Agent Zero a complete A2A 1.0 server.
-Agent Zero's native worker currently creates and removes a temporary agent
-context per inbound task. This plugin preserves protocol context identifiers;
-it does not change that host memory lifecycle or promise reverse-call recall.
+Fallback is restricted to received parse failures and known non-native profiles.
+Authentication/network errors, malformed native A0 replies, unknown versions,
+and lossy conversions remain failures. Requests are not retried with a different
+method when the peer rejects the native method. Streaming, gRPC/REST bindings,
+OAuth and push conversion are outside this release's tested scope. File/data
+conversion is fixture-tested; live reply evidence is text-only.
 
-Disable the plugin or set `inbound_compatibility` to `false` to bypass the
-wrapper on subsequent requests. Reload after uninstalling to remove the hook.
-No host source files are patched. Unsupported startup interfaces leave native
-A2A running and report a diagnostic.
+## Migration from 0.1.x
 
-## Supported scope and limits
+Remove/archive the old `tools/a2a_unified_chat.py` and its matching prompt when
+upgrading an installed folder. There is no replacement chat tool. Remove old
+`peers`/`routes` configuration; retain only explicitly required endpoint-bound
+credentials. Preserve private credentials and old conversation state for recovery.
 
-Known JSON-RPC task/message wrappers, IDs, roles, states, text/data/file parts,
-metadata, and timezone-aware timestamps are converted. File/data conversions
-are fixture-tested; live evidence is text-only. Unknown versions, unsupported
-content, and conversions that would drop known unmapped fields fail explicitly.
+Earlier manual installations may also have added a native agent-profile prompt
+note and a shared A2A_TOKEN entry. Back up and undo only those verified changes;
+restore independently verified prior host state and reload when safe. Keep all
+future compatibility behavior within this plugin. Branches inherit old messages,
+including incorrect routing claims; removing a plugin cannot erase that history.
+Validate fresh requests against the intended native endpoint rather than copying
+an earlier mistaken Hermes association.
 
-This release does not implement arbitrary future versions, streaming conversion,
-gRPC, REST bindings, OAuth negotiation, or push-notification conversion. It is
-an extensible format unifier, not a promise that all frameworks interoperate.
-Converted bodies are limited to 4 MiB. Native legacy requests and streaming
-bypass this adapter, including that size limit.
-
-## Upgrading from 0.1.0
-
-Move any Hermes credential out of shared `A2A_TOKEN` into the plugin-private
-file and change only that peer's config to `token_file`. Restore the native
-environment's independently verified prior value; do not delete a value used
-by another service. Remove any unifier routing note previously added to an
-agent-profile `a2a_chat` prompt. Back up those files and reload the UI process
-when safe so it stops retaining the previous environment. Preserve the user's
-plugin toggle and existing conversation state. These steps undo the earlier
-manual installation's containment violation; new installations require no host
-prompt or shared-environment edits.
-
-Portable source and assembly instructions live at
-`portable/a2a_format_unifier/` in the Agent Plugins monorepo. The installation
-needs only this complete plugin folder. See that source directory's
-`VERIFICATION.md` for precise test and live-runtime evidence.
+The shared core, assembly command, tests and precise evidence are documented in
+`portable/a2a_format_unifier/` in the Agent Plugins monorepo. This assembled
+package includes its core and MIT license and needs no monorepo at runtime.

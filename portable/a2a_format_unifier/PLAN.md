@@ -18,6 +18,13 @@ source. Add packaging instructions, owning DOX, catalog entry, and evidence.
 
 ## Implemented
 
+Version 0.2.0 replaces the separate chat/routing tool with native-first parser
+fallback. No preferred Hermes peer, alias registry or broker delegation remains.
+The native tool is unchanged; received incompatible foreign replies may be
+adapted after validation failure. Native and foreign live checks each completed
+with one send at the selected endpoint; native A0 needed zero adaptations.
+See the current verification record above the historical 0.1.x design notes.
+
 Version 0.1.1 adds strict containment: native traffic bypass, plugin-private
 credentials, no native prompt override, explicit broker aliases, disabled-state
 preservation, and 26 passing checks. The authorized native laptop ping completed

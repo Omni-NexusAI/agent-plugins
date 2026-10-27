@@ -1,26 +1,28 @@
-# Agent Zero A2A Unifier Adapter DOX
+# Agent Zero native-first A2A fallback DOX
 
-The assembled package is `a2a_format_unifier`; keep this identity in the manifest and Python imports.
-`a2a_unified_chat` resolves cross-framework peer aliases, loads a plugin-private credential
-or explicitly selected dedicated environment credential (never native A2A_TOKEN),
-and persists one context per endpoint in private `.runtime/`. Explicit reset is user-directed.
-Delegation routes are configuration, not protocol special cases or proof of device availability.
+Package identity is a2a_format_unifier. There is no chat tool, peer alias
+registry, broker route, or preferred endpoint. Native a2a_chat remains the
+only agent-facing chat path. Do not add a model prompt advertising Hermes.
 
-`helpers/server.py` wraps `DynamicA2AProxy.__call__` in memory after the guarded init hook.
-The wrapper preserves native authentication and supports only SendMessage, GetTask, and CancelTask
-aliases plus same-request-origin card URLs. Disablement or `inbound_compatibility: false` bypasses it.
-Native requests and the legacy card bypass before plugin config/body inspection.
-Only explicit A2A-Version 1.0 POSTs and the modern card alias opt in. Keep all
-prompts and credentials plugin-local; never change native tool/profile prompts.
-Respect disabled state, and keep native A0 peers on built-in a2a_chat. Use
-framework-specific broker aliases rather than hijacking a machine's A0 name.
-Poll submitted/working native tasks without repeating sends (90-second maximum).
-Expose the final agent history entry as a status message when absent; interpret
-the installed native worker's naive timestamps using its process-local timezone.
-Native inbound task contexts remain temporary: protocol IDs do not imply host memory persistence.
-Unsupported host signatures degrade without preventing Agent Zero startup. A UI reload activates
-the startup hook; allow several minutes for existing integrations before concluding startup failed.
+helpers/native_client.py installs guarded in-memory wrappers around the native
+AgentConnection constructor/card reader. Original native validation runs first.
+Only a caught native ValidationError on an already received, successful,
+non-Agent-Zero response can invoke the shared fallback converter. Revalidate
+converted replies with the native schema. Never resend a message or change the
+selected URL, method, task ID, context, or intended peer. Preserve native errors.
 
-Do not add dependencies, services, blanket server-v1 claims, raw credential arguments, or core edits.
-The default config is an example; local routes and private settings must not enter the repository.
-Tests and live evidence must distinguish client reply parsing from native reverse initiation.
+Optional endpoint-scoped credentials match exact URL/port/path and may check the
+advertised card name before messages. They are not a routing table. Credentials
+are plugin-private; never read or mutate native A2A_TOKEN for this integration.
+No native/profile source, global credentials, memories or model settings are edited.
+
+The inbound server binding is still opt-in for v1 POSTs and the modern card alias.
+Native legacy cards/requests bypass it. Disabling bypasses new connections and
+requests; reload removes in-memory wrappers. Respect the user's toggle.
+
+Native tests must show no adaptation on compatible or malformed Agent Zero
+replies, native parsing before fallback, one send only, unchanged selected
+endpoint, no auth-error fallback, identity mismatch before sends, unknown-format
+failure, and original behavior when disabled. Do not turn a card check into
+proof of a generated live reply. Branch history can retain old incorrect routes;
+never silently edit user conversations to hide that.

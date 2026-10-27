@@ -1,7 +1,7 @@
 name: a2a_format_unifier
 title: A2A Format Unifier
-description: Framework-independent A2A 0.3 and 1.0 format conversion, with a native Agent Zero tool and persistent peer conversations.
-version: 0.1.1
+description: Native-first A2A reply-format fallback for incompatible cross-framework peers. No chat tool, routing aliases, or preferred peer.
+version: 0.2.0
 always_enabled: false
 settings_sections: []
 per_project_config: false

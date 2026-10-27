@@ -8,3 +8,8 @@ class InstallA2AUnifier(Extension):
             install()
         except (ImportError, RuntimeError):
             print("A2A Format Unifier: inbound adapter unavailable on this host; native server retained", flush=True)
+        try:
+            from usr.plugins.a2a_format_unifier.helpers.native_client import install
+            install()
+        except (ImportError, RuntimeError):
+            print("A2A Format Unifier: client adapter unavailable on this host; native client retained", flush=True)

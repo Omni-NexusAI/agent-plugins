@@ -12,6 +12,10 @@
 - Known dialects are A2A 0.3.x, 1.0.x, and the observed FastA2A 0.2.5 profile.
 - Unknown versions, bindings, and lossy mappings fail explicitly. Never claim all frameworks or future versions work.
 - Never retry a send automatically after parsing failure; the remote agent may already have run it.
+- Version 0.2.0 is native-first reply fallback, not a chat/peer-routing layer.
+  Expose no chat tool, alias registry, default Hermes peer or broker delegation.
+  Keep the native selected endpoint and parser first; adapt only a received
+  non-Agent-Zero reply after validation fails, then validate natively again.
 - Preserve authentication, errors, task state, metadata, and context. Never bypass native server authentication.
 - Agent Zero inbound support is an idempotent in-memory ASGI binding; no shipped source files are edited.
 - Native A0 requests bypass the adapter before body reads. Only explicit v1 POST

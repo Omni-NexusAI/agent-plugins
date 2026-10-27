@@ -1,5 +1,37 @@
 # Verification record
 
+## 0.2.0 native-first fallback - October 26, 2026
+
+- Removed the agent-facing a2a_unified_chat tool and its prompt, all preferred
+  peer defaults, the peers/routes registry, and broker delegation behavior.
+- The only chat entry point is the original a2a_chat. Plugin-owned integration
+  calls the original client/parser first, adapting an already received reply
+  only after native validation fails on a known non-Agent-Zero wire profile.
+- Native A0 replies, authentication/network errors, unknown formats and selected
+  endpoints are not substituted or silently repaired. Converted replies are
+  validated again using the native schema. No send is retried.
+- Optional credentials are scoped to an explicitly selected exact URL, with
+  optional expected card-name validation before messages. There are no aliases.
+- Linux: 36 checks passed in the installed native Agent Zero/FastA2A environment.
+  Windows: 28 portable checks passed; 8 native integration checks were skipped
+  because that host Python does not contain the Agent Zero runtime.
+- Controlled live checks invoked the actual native A2AChatTool.execute with the
+  fallback enabled only inside the test process. Laptop Agent Zero returned the
+  requested marker after exactly one send, with zero adaptations. Hermes returned
+  its requested marker after exactly one send, with two response adaptations
+  (send/poll). Both retained the exact selected endpoint. No device relay occurred.
+- The persistent plugin toggle remained disabled during both live checks. The
+  legacy tool/prompt were absent. The native source files were not overwritten;
+  local deployment changed plugin-owned files/configuration only and reloaded
+  the UI once to clear loaded legacy tool classes.
+- The inspected branch had inherited the earlier incorrect LaptopA0-to-Hermes
+  rename, re-enabled the old tool, then selected Hermes directly. New plugin
+  code cannot erase those historical messages. This is not evidence that the
+  native laptop A0 connection was renamed or moved. Validate routing with a
+  fresh request at the intended native endpoint, not the old mistaken alias.
+
+Historical 0.1.x records below describe earlier designs and tests.
+
 ## 0.1.1 containment correction - October 26, 2026
 
 - 26 isolated checks passed on Windows Python 3.14 and Linux Python 3.12.

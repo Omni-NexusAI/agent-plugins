@@ -39,7 +39,7 @@
 
 ## Child DOX Index
 
-- `a2a_format_unifier/AGENTS.md`: assembled Agent Zero tool and guarded native
+- `a2a_format_unifier/AGENTS.md`: native-first reply fallback and guarded native
   A2A binding; editable source lives under `portable/a2a_format_unifier/`.
 
 - `browser_session_sync/AGENTS.md`: plugin-owned browser session restore, current-state tracking, manual recovery, and performance safeguards.

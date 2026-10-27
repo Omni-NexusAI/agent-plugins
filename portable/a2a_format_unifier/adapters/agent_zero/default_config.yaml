@@ -1,7 +1,3 @@
-timeout: 180
+outbound_fallback: true
 inbound_compatibility: true
-peers:
-  hermes:
-    url: http://host.docker.internal:9900/
-    token_file: .private/hermes.token
-routes: {}
+endpoints: []
