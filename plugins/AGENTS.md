@@ -39,6 +39,14 @@
 
 ## Child DOX Index
 
+- `native_a2a_peer_directory/AGENTS.md`: explicit native contacts through temporary
+  prompt metadata, with no compatibility, routing or transport ownership.
+- `native_tool_output_contract/AGENTS.md`: opt-in per-call provider JSON envelope
+  with no model output conversion, tool selection or shared settings mutation.
+
+- `a2a_format_unifier/AGENTS.md`: native-first reply fallback and guarded native
+  A2A binding; editable source lives under `portable/a2a_format_unifier/`.
+
 - `browser_session_sync/AGENTS.md`: plugin-owned browser session restore, current-state tracking, manual recovery, and performance safeguards.
 - `_agentspine_identity/AGENTS.md`: Agentspine product identity overlay, greeting, banner, title, and version display.
 - `_enhanced_mcp_config/AGENTS.md`: MCP settings UI, disabled flag handling, status/apply/toggle API handlers, and override payload copied from the GPU-pre container.
