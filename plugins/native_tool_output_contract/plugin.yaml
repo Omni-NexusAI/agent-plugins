@@ -1,0 +1,8 @@
+name: native_tool_output_contract
+title: Native Tool Output Contract
+description: Opt-in per-call JSON envelope for explicitly verified OpenRouter chat models. No tool execution or response conversion.
+version: 0.1.0
+always_enabled: false
+settings_sections: []
+per_project_config: true
+per_agent_config: false

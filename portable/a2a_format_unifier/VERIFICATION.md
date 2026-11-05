@@ -26,8 +26,19 @@
   Unifier owns no native aliases or peer directory.
 - The current Hermes outbound check sent once but exceeded the native client's
   30-second HTTP response window before a compatible reply was received. No
-  automatic resend was made. Current completed Hermes-direction acceptance is
-  pending; historical evidence below must not be mistaken for this run.
+  automatic resend was made. The same accepted task was correlated through
+  Hermes's native conversation record: its own gateway produced no agent reply
+  within 300 seconds and marked the task failed. There was no reply to adapt.
+- Hermes-to-Agent-Zero completed through Hermes's original a2a_call client in
+  69 seconds: one SendMessage, the intended endpoint, completed task state and
+  the requested generated acknowledgment. No Hermes-side plugin was installed.
+- A separate reviewed Native Tool Output Contract then fixed the demonstrated
+  ordinary final-envelope failure for the explicitly verified desktop model.
+  With the contact directory and per-call output contract enabled, but Unifier
+  disabled, the same plain named-peer request completed after one native call
+  with the actual remote reply and valid native response.text in 116 seconds.
+  This is separate from protocol compatibility; Unifier gained no native peer
+  or model-output ownership. Other models require independent validation.
 - No native core/profile prompt, model/provider setting, shared A2A_TOKEN,
   persisted user conversation, or recent task-history fix was changed by the
   plugin update. Native credentials remain in the existing native secret store;
