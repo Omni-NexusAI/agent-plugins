@@ -32,6 +32,15 @@
   byte-identical. The native peer credential was absent from the model window
   and serialized chat. No process restart, provider setting change, history edit,
   reply conversion or synthetic successful answer was performed.
+- The laptop owner independently verified its exact OpenRouter GLM model with
+  a synthetic schema request before enabling the same reviewed plugin in normal
+  default scope. Its ordinary named-desktop request then completed in 135
+  seconds: one native LAN call, real acknowledgment, native response.message,
+  no warnings/errors/resend, and no Unifier installed. Native ResponseTool
+  accepts either text or message. The saved receipt was evaluated without
+  resending after correcting an overly narrow text-only evidence checker.
+  Protected native files, existing conversations, guard and anchor were
+  preserved; the native credential was absent from model and saved history.
 
 This proves the single tested ordinary workflow, not sustained reliability or
 support for other models/backends. Tool-specific arguments are still validated

@@ -32,3 +32,10 @@ model. Unifier remained disabled: one native A2A call received the real laptop
 reply and the agent returned it through native response.text without warnings
 or retries in 116 seconds. This directory owns discovery metadata only; the
 provider output contract remains a separate optional package.
+
+The laptop owner also passed an ordinary default-chat request naming the desktop
+without a URL/auth/schema hint. With the independently verified GLM output
+contract and this directory enabled, and no Unifier installed, one native LAN
+call received the requested acknowledgment and returned it via the native
+response.message argument in 135 seconds, without warnings or resends. This is
+one ordinary workflow in each direction, not sustained reliability evidence.

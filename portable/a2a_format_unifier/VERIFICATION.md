@@ -24,11 +24,21 @@
   Automatic semantic recall can still miss an explicit native contact. The
   separate optional Native A2A Peer Directory supplies temporary contact metadata;
   Unifier owns no native aliases or peer directory.
-- The current Hermes outbound check sent once but exceeded the native client's
+- The initial Hermes outbound check sent once but exceeded the native client's
   30-second HTTP response window before a compatible reply was received. No
   automatic resend was made. The same accepted task was correlated through
   Hermes's native conversation record: its own gateway produced no agent reply
   within 300 seconds and marked the task failed. There was no reply to adapt.
+- A read-only gateway stack subsequently found 26 workers waiting on an
+  interactive optional-SDK installation prompt. The running gateway used an
+  older dependency environment; the package manager's selected environment
+  already contained the required SDK. After a backed-up, user-approved restart
+  of only the original gateway task, a new native Agent Zero request returned
+  the exact Hermes acknowledgment in 4.22 seconds: one send, one poll, two
+  response adaptations, unchanged endpoint and no resend. No dependency install
+  or Hermes source/configuration change was needed. Twelve protected source and
+  configuration files remained byte-identical. The unrelated pre-existing API
+  server key failure remains outside this A2A repair.
 - Hermes-to-Agent-Zero completed through Hermes's original a2a_call client in
   69 seconds: one SendMessage, the intended endpoint, completed task state and
   the requested generated acknowledgment. No Hermes-side plugin was installed.
@@ -39,6 +49,12 @@
   with the actual remote reply and valid native response.text in 116 seconds.
   This is separate from protocol compatibility; Unifier gained no native peer
   or model-output ownership. Other models require independent validation.
+- Laptop-owner verification also passed an ordinary default-chat request with
+  its separately verified GLM model: one native call to the intended desktop
+  LAN endpoint, actual acknowledgment and native response.message in 135
+  seconds, with no warnings or resend. Unifier was absent on that host. Native
+  response accepts text or message; both ordinary directions are now verified
+  for these requests, without claiming sustained reliability.
 - No native core/profile prompt, model/provider setting, shared A2A_TOKEN,
   persisted user conversation, or recent task-history fix was changed by the
   plugin update. Native credentials remain in the existing native secret store;
