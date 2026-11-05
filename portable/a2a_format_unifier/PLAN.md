@@ -1,5 +1,19 @@
 # A2A Format Unifier implementation plan
 
+## November 5 repair
+
+Restore direct native peer selection by removing demonstrated obsolete runtime
+memory guidance separately, with private backups and native memory APIs. Do not
+ship memory edits, peer aliases or routes as plugin behavior. Verify native
+LAN and Tailscale replies with compatibility disabled before activating it.
+
+Add a plugin-owned lifecycle hook so enabling the adapter in a running Agent
+Zero installs its guarded bindings without a process restart. Preserve the
+native parser, endpoint, credentials and exactly-once send semantics. Test
+disabled/unrelated-change behavior, idempotent activation and unsupported-host
+isolation. Recheck real native and Hermes replies after activation. Keep this
+PR draft and unmerged.
+
 Create a framework-independent format core and an Agent Zero adapter. Assemble
 a self-contained `plugins/a2a_format_unifier` distribution that imports no
 monorepo paths at runtime. Keep device routes and credentials configurable.

@@ -17,6 +17,7 @@ been verified.
 | Plugin | Framework | Status |
 | --- | --- | --- |
 | [`a2a_format_unifier`](plugins/a2a_format_unifier/) | Agent Zero | Development; shared [portable core](portable/a2a_format_unifier/) and native adapter |
+| [`native_a2a_peer_directory`](plugins/native_a2a_peer_directory/) | Agent Zero | Development; optional explicit native contacts, separate from format compatibility |
 | [`_agentspine_identity`](plugins/_agentspine_identity/) | Agentspine | Active |
 | [`_multi_source_updater`](plugins/_multi_source_updater/) | Agentspine | Active |
 | Auxiliary model roles | Agent Zero | Planned; no package yet |

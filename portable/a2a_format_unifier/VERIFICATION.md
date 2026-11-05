@@ -1,5 +1,38 @@
 # Verification record
 
+## 0.2.1 live activation and isolation - November 5, 2026
+
+- 41 checks passed inside the installed Agent Zero/FastA2A runtime, importing
+  a separately assembled distribution. The five new lifecycle checks cover
+  disabled/unrelated/failed changes, idempotent installation, and independently
+  unsupported client/server interfaces. Assembly matches portable source.
+- The supported plugin-change end hook activated both bindings in the running
+  host without restarting it. The modern card alias changed from 404 to 200;
+  its advertised origin matched the caller, and unauthenticated access stayed
+  401. The legacy native card remained byte-identical with HTTP 200.
+- With compatibility disabled/absent, direct native Agent Zero generated replies
+  completed in both directions over both LAN and Tailscale. Each strict test sent
+  once. With compatibility enabled, another native laptop reply completed after
+  one send and 21 polls in 58 seconds, with zero adaptations and unchanged URL.
+- Ordinary agent-driven acceptance is a separate gate. A real named-peer call
+  selected the correct native endpoint and received its reply, then a malformed
+  final-answer object caused additional investigation and a repeated model-level
+  tool call. This does not pass one-send ordinary-agent acceptance. Another
+  native task completed after the caller's 300-second observation window.
+- Earlier false Hermes-alias memories and obsolete work-folder probes were
+  corrected or retired as backed-up operator cleanup, not shipped plugin behavior.
+  Automatic semantic recall can still miss an explicit native contact. The
+  separate optional Native A2A Peer Directory supplies temporary contact metadata;
+  Unifier owns no native aliases or peer directory.
+- The current Hermes outbound check sent once but exceeded the native client's
+  30-second HTTP response window before a compatible reply was received. No
+  automatic resend was made. Current completed Hermes-direction acceptance is
+  pending; historical evidence below must not be mistaken for this run.
+- No native core/profile prompt, model/provider setting, shared A2A_TOKEN,
+  persisted user conversation, or recent task-history fix was changed by the
+  plugin update. Native credentials remain in the existing native secret store;
+  Hermes credentials remain plugin-private. Runtime data is excluded from source.
+
 ## 0.2.0 native-first fallback - October 26, 2026
 
 - Removed the agent-facing a2a_unified_chat tool and its prompt, all preferred

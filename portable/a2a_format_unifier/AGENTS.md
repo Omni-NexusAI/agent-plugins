@@ -23,6 +23,8 @@
 - Keep credentials plugin-private. Never own native A2A_TOKEN, host/profile
   prompt overrides, native peer aliases, or enablement policy outside the plugin.
 - Disablement bypasses the inbound wrapper. No separate service or listener is created.
+- Adapter lifecycle hooks bind on supported live enablement after plugin-cache
+  invalidation as well as startup; unrelated/failed changes do not install.
 - Keep runtime config, credentials, locks, conversation state, logs, and caches out of the distribution.
 - Assemble all shared code into each adapter distribution; never import the monorepo at runtime.
 - Keep the assembled plugin, source, catalog, README, and verification record aligned.

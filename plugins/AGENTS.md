@@ -39,6 +39,9 @@
 
 ## Child DOX Index
 
+- `native_a2a_peer_directory/AGENTS.md`: explicit native contacts through temporary
+  prompt metadata, with no compatibility, routing or transport ownership.
+
 - `a2a_format_unifier/AGENTS.md`: native-first reply fallback and guarded native
   A2A binding; editable source lives under `portable/a2a_format_unifier/`.
 

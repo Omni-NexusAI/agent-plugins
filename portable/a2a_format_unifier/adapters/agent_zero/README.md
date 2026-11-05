@@ -1,6 +1,6 @@
 # A2A Format Unifier for Agent Zero
 
-Version 0.2.0 is a native-first format fallback. It has **no separate chat tool,
+Version 0.2.1 is a native-first format fallback. It has **no separate chat tool,
 preferred peer, device alias registry, broker routing, or Hermes default**.
 Agent Zero's built-in `a2a_chat` chooses the intended endpoint, sends the message,
 validates replies, and owns its conversation state.
@@ -24,8 +24,12 @@ authentication remains authoritative. This is not a complete A2A 1.0 server.
 ## Install
 
 Copy this complete `a2a_format_unifier` folder into persistent `usr/plugins/`,
-enable it when desired, and reload the UI process once. The portable source
-folder alone is not installable. No native source, shared environment, agent
+then enable it through Agent Zero's normal plugin manager. On the supported
+host, the plugin-change end hook installs its guarded bindings after discovery
+caches clear; a process restart is not required. Startup hooks cover subsequent
+normal starts. Both installers are idempotent; disabled/unrelated changes do
+not activate them. The portable source folder alone is not installable.
+No native source, shared environment, agent
 profile prompt, provider setting, or model history needs modification.
 
 Default configuration:

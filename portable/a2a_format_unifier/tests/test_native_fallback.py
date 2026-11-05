@@ -134,5 +134,53 @@ class NativeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sum(method == 'POST' for method, _, _ in self.calls), 2)
 
 
+@unittest.skipUnless(NATIVE_AVAILABLE, "requires installed Agent Zero/FastA2A")
+class LifecycleTests(unittest.TestCase):
+    def test_disabled_activation_does_not_install_either_binding(self):
+        from a2a_format_unifier.helpers import bindings, server
+        with patch('helpers.plugins.get_enabled_plugins', return_value=[]), \
+             patch.object(native_client, 'install') as client, patch.object(server, 'install') as inbound:
+            self.assertEqual(bindings.install_enabled(), {'enabled': False, 'server': False, 'client': False})
+        client.assert_not_called()
+        inbound.assert_not_called()
+
+    def test_unrelated_or_failed_change_does_not_activate(self):
+        from a2a_format_unifier.helpers import bindings
+        with patch.object(bindings, 'install_enabled') as install:
+            bindings.after_plugin_change({'args': (['another_plugin'],), 'kwargs': {}, 'exception': None})
+            bindings.after_plugin_change({'args': (['a2a_format_unifier'],), 'exception': RuntimeError('failed')})
+        install.assert_not_called()
+
+    def test_own_toggle_and_full_refresh_use_enabled_installation(self):
+        from a2a_format_unifier.helpers import bindings
+        with patch.object(bindings, 'install_enabled', return_value='installed') as install:
+            self.assertEqual(bindings.after_plugin_change({'kwargs': {'plugin_names': ['a2a_format_unifier']}}), 'installed')
+            self.assertEqual(bindings.after_plugin_change({'args': (None,)}), 'installed')
+        self.assertEqual(install.call_count, 2)
+
+    def test_real_binding_installation_is_idempotent_and_restorable(self):
+        from a2a_format_unifier.helpers import bindings, server
+        from helpers.fasta2a_server import DynamicA2AProxy
+        original_init, original_card, original_server = AgentConnection.__init__, AgentConnection.get_agent_card, DynamicA2AProxy.__call__
+        try:
+            with patch('helpers.plugins.get_enabled_plugins', return_value=['a2a_format_unifier']):
+                first = bindings.install_enabled()
+                second = bindings.install_enabled()
+            self.assertEqual(first, {'enabled': True, 'server': True, 'client': True})
+            self.assertEqual(second, {'enabled': True, 'server': False, 'client': False})
+            self.assertIs(AgentConnection.__init__._a2a_original, original_init)
+            self.assertIs(DynamicA2AProxy.__call__._a2a_original, original_server)
+        finally:
+            AgentConnection.__init__, AgentConnection.get_agent_card, DynamicA2AProxy.__call__ = original_init, original_card, original_server
+
+    def test_unsupported_binding_does_not_disable_other_direction(self):
+        from a2a_format_unifier.helpers import bindings, server
+        with patch('helpers.plugins.get_enabled_plugins', return_value=['a2a_format_unifier']), \
+             patch.object(server, 'install', side_effect=RuntimeError('unsupported')), \
+             patch.object(native_client, 'install', return_value=True):
+            result = bindings.install_enabled()
+        self.assertEqual(result, {'enabled': True, 'server': False, 'client': True})
+
+
 if __name__ == '__main__':
     unittest.main()

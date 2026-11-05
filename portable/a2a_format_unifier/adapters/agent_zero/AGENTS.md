@@ -20,6 +20,13 @@ The inbound server binding is still opt-in for v1 POSTs and the modern card alia
 Native legacy cards/requests bypass it. Disabling bypasses new connections and
 requests; reload removes in-memory wrappers. Respect the user's toggle.
 
+helpers/bindings.py owns guarded startup and live activation. The supported
+helpers.plugins.after_plugin_change end hook installs bindings only for this
+plugin or a full refresh, after cache invalidation. Disabled, unrelated and
+failed changes do not activate it. Both binding installers remain idempotent;
+unsupported client/server interfaces fail independently. No service restart,
+new listener, native source edit or model prompt is required to enable it.
+
 Native tests must show no adaptation on compatible or malformed Agent Zero
 replies, native parsing before fallback, one send only, unchanged selected
 endpoint, no auth-error fallback, identity mismatch before sends, unknown-format

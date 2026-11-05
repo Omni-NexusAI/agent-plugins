@@ -12,6 +12,8 @@ frameworks can bind the core without duplicating its wire-format decisions.
 - `core/middleware.py`: ASGI legacy-server request/response conversion, no host imports.
 - `core/fallback.py`: reply-only conversion after native validation fails; no peer selection.
 - `adapters/agent_zero/`: config, exact endpoint credentials, guarded native-client/server bindings, docs. No chat tool or routing aliases.
+- `adapters/agent_zero/helpers/bindings.py`: idempotent enabled-only startup and
+  plugin-change activation, without restarting the host process.
 - `tests/`: regression fixtures and fake transport/ASGI tests.
 - `build.py`: deterministic assembly; includes core in `helpers/` and repository license.
 
