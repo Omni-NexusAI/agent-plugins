@@ -1,6 +1,7 @@
 """Plugin-local native-first parser fallback; never chooses a destination."""
 import inspect
 import json
+from importlib import import_module
 from urllib.parse import urlsplit
 
 from .credentials import resolve_credential
@@ -72,9 +73,20 @@ class NativeReplyFallback:
         return await self._call("get_task", get_task_response_ta.validate_python, *args, **kwargs)
 
 
+def _native_connection_class():
+    """Resolve supported host layouts without masking missing dependencies."""
+    try:
+        module = import_module("helpers.fasta2a_client")
+    except ModuleNotFoundError as exc:
+        if exc.name != "helpers.fasta2a_client":
+            raise
+        module = import_module("plugins._a2a_chat.helpers.fasta2a_client")
+    return module.AgentConnection
+
+
 def install():
     from pathlib import Path
-    from helpers.fasta2a_client import AgentConnection
+    AgentConnection = _native_connection_class()
     import fasta2a.client as client_module
     original_init = AgentConnection.__init__
     original_card = AgentConnection.get_agent_card

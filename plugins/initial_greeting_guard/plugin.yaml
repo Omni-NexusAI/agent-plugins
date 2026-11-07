@@ -1,0 +1,8 @@
+name: initial_greeting_guard
+title: Initial Greeting Guard
+description: Keeps provenance-marked synthetic welcome turns out of model requests while retaining the visible welcome and stored history.
+version: 0.0.2
+always_enabled: false
+settings_sections: []
+per_project_config: false
+per_agent_config: false

@@ -1,5 +1,46 @@
 # Verification record
 
+## 0.2.2 restored v2.15 verification - November 7, 2026
+
+- Executable sources survived restoration, but the native host moved its A2A
+  client into plugins._a2a_chat.helpers.fasta2a_client. The adapter now resolves
+  that layout only when the legacy module itself is missing; nested dependency
+  failures are not masked. Forty-five focused checks passed in the actual v2.15
+  framework runtime, including the supported own-plugin namespace refresh.
+- Host-side bind-mount writes did not refresh cached helpers. The supported
+  plugin-change end extension now refreshes only its own namespace before
+  guarded activation. Failed/unrelated changes do not purge it. The live
+  authenticated status API confirmed both client and server bindings without
+  a service restart; it exposes no credentials, endpoints or conversation data.
+- One ordinary name-only fresh default-chat request completed through native
+  a2a_chat with Unifier disabled in 88 seconds: one intended native LAN call,
+  real acknowledgment and correct final answer, no warnings or resend. The
+  separate directory and output contract supplied their own narrow functions.
+- With Unifier enabled, native LAN and Tailscale replies each completed after
+  one send, with zero adaptations and unchanged endpoint (24 and32 seconds).
+  Agent Zero to Hermes completed after one send/one poll/two reply adaptations
+  in6.35 seconds. Hermes's unchanged native client completed one reverse task in
+  37 seconds after a separately backed-up stale local peer-port correction.
+- Native core/profile/provider/model choices and existing chats were preserved.
+  Targeted stale memory records were corrected through native management APIs
+  as operator cleanup, not plugin behavior. Runtime configuration, credentials
+  and private topology/evidence remain outside the published package.
+- The laptop's reciprocal native contact also retained the old desktop port.
+  A guarded native-peer repair backed up that dedicated config and changed only
+  its existing LAN/Tailscale ports, retaining all identity/credential references.
+  Independent native file-read verification confirmed the exact two-field change
+  and durable backup. The same accepted task was polled after a local checker
+  error; no message was resent. Its native return request was independently
+  confirmed completed in the restored desktop's retained native task store,
+  with the exact synthetic reply. This is incoming native request/reply evidence,
+  not an inference from Hermes's reverse call or successful cards.
+
+These are current request-specific results. The incoming native return route's
+specific interface was not independently captured, and a separate laptop-origin
+Tailscale return was not tested. The full four-way November5 route matrix is
+therefore not claimed rerun. No sustained reliability or arbitrary-framework
+support is claimed.
+
 ## 0.2.1 live activation and isolation - November 5, 2026
 
 - 41 checks passed inside the installed Agent Zero/FastA2A runtime, importing

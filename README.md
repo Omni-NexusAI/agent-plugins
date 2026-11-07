@@ -19,6 +19,7 @@ been verified.
 | [`a2a_format_unifier`](plugins/a2a_format_unifier/) | Agent Zero | Development; shared [portable core](portable/a2a_format_unifier/) and native adapter |
 | [`native_a2a_peer_directory`](plugins/native_a2a_peer_directory/) | Agent Zero | Development; optional explicit native contacts, separate from format compatibility |
 | [`native_tool_output_contract`](plugins/native_tool_output_contract/) | Agent Zero | Development; optional per-call JSON envelope for verified chat models |
+| [`initial_greeting_guard`](plugins/initial_greeting_guard/) | Agent Zero | Development; source-verified synthetic welcome provenance with genuine-history preservation |
 | [`_agentspine_identity`](plugins/_agentspine_identity/) | Agentspine | Active |
 | [`_multi_source_updater`](plugins/_multi_source_updater/) | Agentspine | Active |
 | Auxiliary model roles | Agent Zero | Planned; no package yet |

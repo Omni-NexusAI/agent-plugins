@@ -39,6 +39,10 @@
 
 ## Child DOX Index
 
+- `initial_greeting_guard/AGENTS.md`: source-verified synthetic welcome provenance,
+  temporary model-history projection, genuine-history preservation and own-namespace
+  hot refresh; no native source changes or universal task-loss claim.
+
 - `native_a2a_peer_directory/AGENTS.md`: explicit native contacts through temporary
   prompt metadata, with no compatibility, routing or transport ownership.
 - `native_tool_output_contract/AGENTS.md`: opt-in per-call provider JSON envelope

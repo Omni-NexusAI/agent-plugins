@@ -6,6 +6,9 @@ only agent-facing chat path. Do not add a model prompt advertising Hermes.
 
 helpers/native_client.py installs guarded in-memory wrappers around the native
 AgentConnection constructor/card reader. Original native validation runs first.
+Resolve the legacy helpers.fasta2a_client layout first, then the v2.15
+plugins._a2a_chat.helpers.fasta2a_client layout only when the legacy module itself
+is missing. Never suppress a missing nested dependency or patch both classes.
 Only a caught native ValidationError on an already received, successful,
 non-Agent-Zero response can invoke the shared fallback converter. Revalidate
 converted replies with the native schema. Never resend a message or change the
@@ -26,6 +29,12 @@ plugin or a full refresh, after cache invalidation. Disabled, unrelated and
 failed changes do not activate it. Both binding installers remain idempotent;
 unsupported client/server interfaces fail independently. No service restart,
 new listener, native source edit or model prompt is required to enable it.
+The own-plugin change extension explicitly refreshes only its usr.plugins
+namespace before activation, preserving unrelated modules when bind-mount file
+events are unavailable. Unrelated and failed changes must not purge modules.
+api/status.py reports only current interface/binding flags through the native
+authenticated API. It must not install, dispatch, return credentials/config or
+claim a completed conversation from these flags.
 
 Native tests must show no adaptation on compatible or malformed Agent Zero
 replies, native parsing before fallback, one send only, unchanged selected

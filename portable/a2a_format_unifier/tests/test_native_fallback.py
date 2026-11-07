@@ -7,11 +7,12 @@ from unittest.mock import patch
 from a2a_format_unifier.helpers.fallback import adapt_rejected_reply
 from a2a_format_unifier.helpers.formats import FormatError
 from a2a_format_unifier.helpers.native_client import configured_endpoint
+from a2a_format_unifier.helpers import native_client
 
 try:
     import httpx
     import pydantic
-    from helpers.fasta2a_client import AgentConnection
+    AgentConnection = native_client._native_connection_class()
     from fasta2a.client import UnexpectedResponseError
     from a2a_format_unifier.helpers import native_client
     NATIVE_AVAILABLE = True
@@ -26,6 +27,27 @@ def result_v1():
 
 
 class ScopeTests(unittest.TestCase):
+    def test_legacy_layout_is_preferred(self):
+        native = object()
+        with patch.object(native_client, 'import_module', return_value=SimpleNamespace(AgentConnection=native)) as load:
+            self.assertIs(native_client._native_connection_class(), native)
+        load.assert_called_once_with('helpers.fasta2a_client')
+
+    def test_v215_layout_only_after_missing_legacy_module(self):
+        native = object()
+        missing = ModuleNotFoundError(name='helpers.fasta2a_client')
+        with patch.object(native_client, 'import_module', side_effect=[missing, SimpleNamespace(AgentConnection=native)]) as load:
+            self.assertIs(native_client._native_connection_class(), native)
+        self.assertEqual([c.args[0] for c in load.call_args_list], ['helpers.fasta2a_client', 'plugins._a2a_chat.helpers.fasta2a_client'])
+
+    def test_missing_nested_dependency_is_not_masked(self):
+        failure = ModuleNotFoundError(name='httpx')
+        with patch.object(native_client, 'import_module', side_effect=failure) as load:
+            with self.assertRaises(ModuleNotFoundError) as caught:
+                native_client._native_connection_class()
+        self.assertIs(caught.exception, failure)
+        self.assertEqual(load.call_count, 1)
+
     def test_exact_endpoint_only_no_name_or_default_selection(self):
         config = {"endpoints": [{"url": "http://hermes.test:9900/", "framework": "hermes"}]}
         self.assertIsNone(configured_endpoint(config, "http://laptop.test:5027/a2a"))
@@ -136,6 +158,19 @@ class NativeTests(unittest.IsolatedAsyncioTestCase):
 
 @unittest.skipUnless(NATIVE_AVAILABLE, "requires installed Agent Zero/FastA2A")
 class LifecycleTests(unittest.TestCase):
+    def test_change_extension_refreshes_only_its_namespace(self):
+        from a2a_format_unifier.extensions.python._functions.helpers.plugins.after_plugin_change.end._90_a2a_unifier import ActivateA2AUnifier
+        from usr.plugins.a2a_format_unifier.helpers import bindings as live_bindings
+        hook = ActivateA2AUnifier(agent=None)
+        with patch('helpers.modules.purge_namespace') as purge, patch.object(live_bindings, 'after_plugin_change') as activate:
+            hook.execute({'args': (['another_plugin'],)})
+            hook.execute({'args': (['a2a_format_unifier'],), 'exception': RuntimeError('fixture')})
+            purge.assert_not_called()
+            activate.assert_not_called()
+            hook.execute({'args': (['a2a_format_unifier'],)})
+            purge.assert_called_once_with('usr.plugins.a2a_format_unifier')
+            activate.assert_called_once()
+
     def test_disabled_activation_does_not_install_either_binding(self):
         from a2a_format_unifier.helpers import bindings, server
         with patch('helpers.plugins.get_enabled_plugins', return_value=[]), \

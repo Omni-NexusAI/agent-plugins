@@ -25,6 +25,9 @@
 - Disablement bypasses the inbound wrapper. No separate service or listener is created.
 - Adapter lifecycle hooks bind on supported live enablement after plugin-cache
   invalidation as well as startup; unrelated/failed changes do not install.
+- Support inspected legacy and v2.15 native client module layouts without hiding
+  missing nested dependencies. Own-plugin changes may refresh only this plugin
+  namespace when bind-mount file notifications are absent.
 - Keep runtime config, credentials, locks, conversation state, logs, and caches out of the distribution.
 - Assemble all shared code into each adapter distribution; never import the monorepo at runtime.
 - Keep the assembled plugin, source, catalog, README, and verification record aligned.

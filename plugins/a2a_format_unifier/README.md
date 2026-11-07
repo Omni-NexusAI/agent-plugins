@@ -1,6 +1,6 @@
 # A2A Format Unifier for Agent Zero
 
-Version 0.2.1 is a native-first format fallback. It has **no separate chat tool,
+Version 0.2.2 is a native-first format fallback. It has **no separate chat tool,
 preferred peer, device alias registry, broker routing, or Hermes default**.
 Agent Zero's built-in `a2a_chat` chooses the intended endpoint, sends the message,
 validates replies, and owns its conversation state.
@@ -8,6 +8,8 @@ validates replies, and owns its conversation state.
 ## Behavior
 
 - The plugin delegates to the original native client first.
+- Both legacy and v2.15 native client module locations are supported; missing
+  nested dependencies remain errors rather than triggering a silent fallback.
 - A compatible reply is returned unchanged. Agent Zero peers are never adapted.
 - Only after the native validator rejects a received non-Agent-Zero reply may
   known A2A 0.3/1.0 fields be normalized and validated again by the native schema.

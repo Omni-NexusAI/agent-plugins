@@ -1,5 +1,24 @@
 # Verification — November 5, 2026
 
+## Restored v2.15 follow-up — November 7
+
+The current Balance GLM Flash and default GLM models were independently checked
+before enabling exact runtime allowlist entries. Each actual native wrapper
+passed isolated loader off/on/off and streaming/nonstreaming mocked wire checks
+with every socket blocked before imports; shared kwargs remained unchanged.
+Public endpoint metadata and one synthetic-only live POST per model confirmed
+json_schema and provider.require_parameters with a correct native envelope.
+No private chat/prompt was replayed. Other models and existing contracts bypass
+the plugin, and the distributed models list remains empty.
+
+A fresh ordinary default-model request subsequently selected the intended native
+peer by name, sent once with Unifier disabled, received its real acknowledgment
+and returned it correctly in88 seconds without warnings. A genuine greeting
+followed by one actual terminal calculation also produced the correct final
+answer without warnings. The separate greeting provenance plugin and directory
+own their own behavior; this plugin still neither chooses tools nor guarantees
+every individual tool argument. Current model/provider selections were retained.
+
 - Eleven isolated checks passed, covering exact model/provider/mode gating,
   the current native `chat` alias, preservation of top-level and nested existing
   contracts, deep kwargs isolation, concurrent clones and hook-only replacement
