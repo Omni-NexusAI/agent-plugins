@@ -9,7 +9,7 @@ This repo is the Omni-NexusAI Agent Plugins monorepo. It holds existing Agent Ze
 ## Ownership
 
 - `plugins/` contains installable Agent Zero-style packages and retained historical sources.
-- `portable/` contains future multi-framework plugin sources; it is not an installable package directory.
+- `portable/` contains shared plugin sources and adapters; it is not an installable package directory. A2A Format Unifier is assembled into `plugins/a2a_format_unifier`.
 - `catalog.json` records source paths, framework compatibility, status, and verified distribution repositories.
 - `sync-to-repos.sh` previews cataloged packages and publishes only an explicitly selected active package to an existing standalone repository through a pull request.
 - `CONTAINER_SYNC.md` records source provenance and compatibility boundaries for existing packages.
