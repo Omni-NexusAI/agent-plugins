@@ -66,15 +66,16 @@ def catalog_entries() -> list[dict]:
             raise SyncError(f"{plugin_id}: manifest name does not match installed folder")
         if not isinstance(entry.get("frameworks"), list) or not entry["frameworks"]:
             raise SyncError(f"{plugin_id}: framework compatibility is missing")
-        if entry.get("status") not in {"active", "development", "historical"}:
+        status = entry.get("status")
+        if status not in {"active", "deprecated", "development", "historical"}:
             raise SyncError(f"{plugin_id}: invalid status")
         destination = entry.get("distribution_repository")
         if destination is not None and (
             not isinstance(destination, str) or not REPO_PATTERN.fullmatch(destination)
         ):
             raise SyncError(f"{plugin_id}: invalid distribution repository")
-        if entry["status"] != "active" and destination is not None:
-            raise SyncError(f"{plugin_id}: non-active source cannot have a destination")
+        if status in {"development", "historical"} and destination is not None:
+            raise SyncError(f"{plugin_id}: {status} source cannot have a destination")
         preserved = entry.get("preserve_destination_paths", [])
         if not isinstance(preserved, list) or any(
             not isinstance(item, str)
@@ -126,7 +127,12 @@ def preview(entries: list[dict]) -> None:
         destination = entry["distribution_repository"]
         eligible = entry["status"] == "active" and destination is not None
         count = len(tracked_source_files(entry))
-        label = f"release preview -> {destination}" if eligible else "no release destination"
+        if eligible:
+            label = f"release preview -> {destination}"
+        elif destination is not None:
+            label = f"legacy repository -> {destination} (publishing disabled)"
+        else:
+            label = "no release destination"
         print(f"{entry['id']}: {entry['status']}; {count} tracked source files; {label}")
 
 

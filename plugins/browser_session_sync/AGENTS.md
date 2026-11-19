@@ -6,6 +6,10 @@ This plugin persists native Agent Zero Browser tabs, cookies, and localStorage a
 
 ## Contracts
 
+- Browser Session Sync is deprecated. Keep the package discoverable for
+  existing users who need dated snapshots, manual recovery, or missing-state
+  fallback. Preserve legacy recovery behavior in deprecation updates.
+
 - Keep all behavior plugin-owned; do not require patches to updater-managed `_browser` files.
 - Automatic restore is boot-gated and one-shot. Save events must never reopen tabs.
 - On shared-runtime hosts, `helpers/native_adapter.py` wraps native startup from startup-migration/agent-init hooks. Capture profile emptiness after native legacy adoption, then apply fallback before native scoped navigation. Legacy runtime-start/WebSocket hooks remain for older hosts.

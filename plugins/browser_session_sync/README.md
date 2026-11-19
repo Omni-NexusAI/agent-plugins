@@ -1,5 +1,17 @@
 # Browser Session Sync
 
+> **Deprecated.** Use Agent Zero's native Browser for everyday persistence.
+
+[Agent Zero v2.10](https://github.com/agent0ai/agent-zero/releases/tag/v2.10)
+added automatic tab restoration and a persistent, shared Chromium sign-in
+profile. Current releases also offer **Browsing data** in the native Browser
+settings for the container profile, including controls for cache, history,
+and cookies. See the [native Browser guide](https://github.com/agent0ai/agent-zero/blob/main/docs/guides/browser.md).
+
+Dated browser recovery snapshots, manual recovery, and missing-state fallback
+remain legacy plugin features. Existing users can recover historical plugin
+snapshots with the plugin's manual restore tool.
+
 Startup migration and agent initialization install the native runtime adapter
 synchronously, matching Agent Zero's dispatchers. Asynchronous initialization
 hooks prevent boot or agent creation even when the runtime adapter passes tests.
@@ -8,9 +20,7 @@ Browser Session Sync keeps recovery snapshots of Agent Zero Browser tabs,
 cookies and localStorage. On Agent Zero 2.11, native persistence owns the
 shared sign-in profile and normal tab restoration.
 
-Use it when you want browser logins, active tabs, and working context to survive
-between A0 sessions without asking the agent to manually restore a saved
-browser state.
+The sections below document the plugin's legacy recovery features.
 
 ## What It Does
 
