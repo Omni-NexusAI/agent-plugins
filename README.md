@@ -9,8 +9,9 @@ are unchanged.
 
 [`catalog.json`](catalog.json) records each package's source path, supported
 frameworks, development status, and verified standalone distribution repository.
-A missing distribution repository means no automatic publication destination has
-been verified.
+A deprecated package can retain its standalone repository link for legacy
+users. Only active packages with a verified destination are eligible for
+sync publication.
 
 ### Framework-specific plugins
 
@@ -25,7 +26,7 @@ been verified.
 
 | Plugin | Frameworks | Status |
 | --- | --- | --- |
-| [`browser_session_sync`](plugins/browser_session_sync/) | Agent Zero, Agentspine | Active; verified [standalone repository](https://github.com/Omni-NexusAI/browser_session_sync) |
+| [`browser_session_sync`](plugins/browser_session_sync/) | Agent Zero, Agentspine | **Deprecated.** Legacy snapshot recovery remains available in the [standalone repository](https://github.com/Omni-NexusAI/browser_session_sync) |
 | [`provider_profiles`](plugins/provider_profiles/) | Agent Zero, Agentspine | Active |
 | [`_enhanced_speech`](plugins/_enhanced_speech/) | Agent Zero, Agentspine | Active; voice compatibility changes are under review |
 | [`ai_link_bridge`](plugins/ai_link_bridge/) | Agent Zero, Agentspine target | Development scaffold; task dispatch is not implemented |
@@ -70,13 +71,9 @@ repository. It copies tracked source files to a review branch in that existing
 repository and opens a pull request. Destination-only files are retained;
 intentional removals require a separate review.
 
-```bash
-./sync-to-repos.sh --plugin browser_session_sync --publish
-```
-
-The Browser Session Sync marketplace `index.yaml` in its standalone repository
-keeps that repository as its source. The copy in this monorepo links here and is
-not transferred by the sync command.
+Add `--publish` to an eligible preview command to propose a sync. Browser
+Session Sync is deprecated and excluded from publishing through this command. Its
+standalone `index.yaml` retains the standalone repository as its source.
 
 ## Maintenance
 

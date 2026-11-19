@@ -1,5 +1,5 @@
 title: Browser Session Sync
-description: WIP plugin for preserving native Browser tabs, cookies, and localStorage across A0 restarts with boot-gated restore and debounced saves.
+description: Deprecated. Use native Agent Zero Browser persistence for everyday use. The plugin remains available for legacy snapshots and manual recovery.
 github: https://github.com/Omni-NexusAI/agent-plugins
 tags:
   - browser
