@@ -1,0 +1,17 @@
+tool:
+  enabled: false
+  provider: ""
+  name: ""
+  api_base: ""
+  ctx_length: 8192
+  kwargs: {}
+coding:
+  enabled: false
+  provider: ""
+  name: ""
+  api_base: ""
+  ctx_length: 16384
+  kwargs: {}
+policy:
+  timeout_seconds: 90
+  max_goal_chars: 8000
