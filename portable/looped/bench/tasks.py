@@ -56,7 +56,7 @@ class Task:
 
 def _arith(rng: random.Random, index: int) -> Task:
     a, b, c, d = (rng.randint(12, 97) for _ in range(4))
-    form = index % 4
+    form = (index // 2) % 4         # pairs share a form, so both splits get every form
     if form == 0:
         question = (f"A shop has {a} boxes with {b} items each. It sells {c} items and then "
                     f"receives {d} more. How many items does it have now?")
@@ -82,7 +82,7 @@ def _tool(rng: random.Random, index: int) -> Task:
     people = ["Ana", "Ben", "Chen", "Dita", "Eli", "Fay"]
     stem, ext = rng.choice(names), rng.choice(["txt", "md", "csv"])
     path = f"{stem}_{rng.randint(1, 99)}.{ext}"
-    form = index % 6
+    form = (index // 2) % 6         # pairs share a form, so both splits get every form
     if form == 0:
         text = f"version {rng.randint(1, 9)}.{rng.randint(0, 9)}"
         return Task(f"tool-{index:04d}", "tool", f"Save the text '{text}' in the file {path}.",

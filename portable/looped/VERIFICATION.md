@@ -7,7 +7,7 @@ changes; do not list a path as verified without running it.
 
 ### Unit tests (host, no Agent Zero)
 
-`python -m unittest discover -s portable/looped/tests -p "test_*.py"`: 97 tests
+`python -m unittest discover -s portable/looped/tests -p "test_*.py"`: 98 tests
 pass (Python 3.13, 2026-11-20).
 
 - Core: step parsing and canonical keys, programmatic checks, settings merge,
@@ -65,16 +65,33 @@ about any real model.
   there is no evidence so far that Looped Mode improves results. The comparison
   with SenseNova-Loop-9B has not been run.
 
-  One live attempt was made on 2026-11-20 against the local router's
-  `swift-1.5-qwen38-27b-stream-200k-vision-mtp` preset (Qwen3.8-27B, thinking
-  off, one request at a time). A ten-task `plain` probe ran (arithmetic 3 of 5,
-  tool choice 5 of 5, about 3.5 s and 84 output tokens per request): far too
-  few tasks to mean anything. The full `dev` run then stopped about 28 minutes
-  in, during the fourth arm, when the machine's RTX 3060 dropped out
-  (`nvidia-smi`: "GPU is lost"). Whether the sustained load contributed is not
-  known. The harness at the time saved results only at the end, so the three
-  finished arithmetic arms were lost; it now saves each row as it finishes and
-  stops after three failed requests in a row.
+  Two live attempts were made on 2026-11-20 against the local router's
+  `swift-1.5-qwen38-27b-stream-200k-vision-mtp` preset (Qwen3.8-27B Q4_K_S,
+  split across an RTX 3060 and an RTX 3070, thinking off, temperature 0.7, one
+  request at a time, about 3.5 s per request). Both ended the same way: the
+  RTX 3060 dropped out (`nvidia-smi`: "GPU is lost", reboot needed), after
+  about 28 minutes of back-to-back requests the first time and about 11 minutes
+  the second. The second run logged the card every 30 s: it peaked at 59 C and
+  152 W, so heat is not the obvious cause. Whether the benchmark's sustained
+  load is the trigger is not established, but it was the workload both times.
+  **Do not start a third run on this preset without the owner's decision.**
+
+  What was measured before the second failure (arithmetic, `dev` split as it
+  was then: only two of the four question types):
+
+  | Arm | Tasks | Accuracy | 95% CI |
+  | --- | ---: | ---: | --- |
+  | plain | 100 | 75.0% | 66% to 83% |
+  | reread (same 81 tasks: plain 74.1%) | 81 | 79.0% | 70% to 88% |
+
+  Re-read fixed 15 and broke 11 of those 81 (exact McNemar p = 0.56): no
+  detectable effect. About a third of answers flipped between two single
+  samples, so sampling noise at temperature 0.7 is larger than any effect
+  this size of run could show. `agree`, `stack`, `deepen`, the thinking-on
+  control and the tool-choice suite were not measured. The first attempt's
+  three finished arms were lost, because the harness then saved only at the
+  end; it now saves each row as it finishes and stops after three failed
+  requests in a row.
 - **Browser rendering.** The settings page, the composer button and the
   composer-side `/looped` handling are served correctly but have not been
   opened in a browser. The test network publishes no port.

@@ -13,10 +13,12 @@ class OpenAIClient:
     """Minimal chat-completions client (standard library only)."""
 
     def __init__(self, endpoint: str, model: str, api_key: str = "", timeout: float = 600.0,
-                 max_tokens: int = 2048, extra: dict[str, Any] | None = None):
+                 max_tokens: int = 2048, extra: dict[str, Any] | None = None,
+                 pause: float = 0.0):
         self.endpoint = endpoint.rstrip("/")
         self.model, self.api_key, self.timeout = model, api_key, timeout
         self.max_tokens, self.extra = max_tokens, dict(extra or {})
+        self.pause = max(0.0, pause)        # idle seconds after each request
         self.calls = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
@@ -39,6 +41,8 @@ class OpenAIClient:
         if seed is not None:
             body["seed"] = seed
         reply = await asyncio.to_thread(self._post, body)
+        if self.pause:
+            await asyncio.sleep(self.pause)
         self.calls += 1
         usage = reply.get("usage") or {}
         self.prompt_tokens += int(usage.get("prompt_tokens") or 0)

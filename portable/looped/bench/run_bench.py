@@ -215,6 +215,8 @@ def parse(argv=None):
     parser.add_argument("--api-key-env", default="", help="environment variable holding the API key")
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument("--timeout", type=float, default=180.0, help="seconds per request")
+    parser.add_argument("--pause", type=float, default=0.0,
+                        help="idle seconds after each request, to go easy on a shared server")
     parser.add_argument("--max-errors", type=int, default=3,
                         help="stop after this many failed requests in a row (0 = never)")
     parser.add_argument("--thinking", choices=("default", "on", "off"), default="default",
@@ -259,7 +261,8 @@ def main(argv=None) -> int:
 
         def make_client(items):
             return OpenAIClient(args.endpoint, args.model, key, max_tokens=args.max_tokens,
-                                extra=extra, timeout=args.timeout)
+                                extra=extra, timeout=args.timeout,
+                                pause=args.pause)
 
     args.out.mkdir(parents=True, exist_ok=True)
     stem = ("dry-run" if args.dry_run else (args.label or args.model).replace("/", "_")) \

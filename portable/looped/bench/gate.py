@@ -75,6 +75,10 @@ def confirm_live(endpoint: str, model: str, requests: int, concurrency: int, *,
         say("  model state:  asleep (idle). The first request wakes it and reloads it into GPU")
         say("                memory, which can take a minute. No other model is loaded or asleep,")
         say("                so nothing is displaced.")
+    elif state["loaded"] is False and not held:
+        say("  model state:  not loaded, and no other model is loaded or asleep, so nothing is")
+        say("                displaced. The first request loads it into GPU memory, which can")
+        say("                take a minute.")
     elif state["loaded"] is False:
         others = ", ".join(held) or "none"
         say(f"  model state:  NOT loaded. Currently loaded or asleep: {others}")

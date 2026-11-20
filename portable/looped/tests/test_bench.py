@@ -158,6 +158,14 @@ class GateTests(unittest.TestCase):
         both = dict(asleep, loaded_models=["model-b"])
         self.assertFalse(self.gate(both, typed="model-a")[0])
 
+    def test_an_idle_server_may_load_the_model_because_nothing_is_displaced(self):
+        idle = {"reachable": True, "listed": True, "loaded": False, "loaded_models": [],
+                "sleeping_models": [], "asleep": False, "note": ""}
+        allowed, text = self.gate(idle, typed="model-a")
+        self.assertTrue(allowed)
+        self.assertIn("nothing is", text)
+        self.assertFalse(self.gate(idle, typed="no")[0])
+
     def test_yes_skips_only_the_typing_not_the_safety_checks(self):
         self.assertTrue(self.gate(self.LOADED, assume_yes=True)[0])
         self.assertFalse(self.gate(self.OTHER, assume_yes=True)[0])

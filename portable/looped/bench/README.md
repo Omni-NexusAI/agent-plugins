@@ -22,7 +22,8 @@ by task.
 - Any `.jsonl` file (format in `tasks.py`), for real datasets such as MMLU-Pro,
   GSM8K or ARC-Challenge subsets. None are bundled or downloaded.
 
-Generated sets have `dev` and `heldout` splits that never overlap. Tune settings
+Generated sets have `dev` and `heldout` splits that never overlap and each
+contain every question type. Tune settings
 on `dev`; report `heldout`. Trying many settings and reporting the best one on
 the same questions finds luck, not improvement.
 
@@ -38,7 +39,8 @@ Each row is also appended to `results/<name>.rows.jsonl` the moment its task
 finishes, so a run that dies keeps what it measured. A request that gets no
 reply within `--timeout` seconds (default 180) counts as an error, and after
 `--max-errors` errors in a row (default 3) the run stops with exit code 3
-instead of waiting out a timeout for every remaining task.
+instead of waiting out a timeout for every remaining task. `--pause SECONDS`
+idles after each request, to go easy on a shared or fragile server.
 
 ## Dry run
 
@@ -60,8 +62,9 @@ Before the first request the gate (`gate.py`):
 
 - prints the endpoint, model, request count and concurrency;
 - checks, read-only, whether that model is the one already loaded;
-- allows a model the router reports as `sleeping` (idle, weights dropped) to be
-  woken only when no other model is loaded or asleep, and says so;
+- allows a model that is not loaded, or that the router reports as `sleeping`
+  (idle, weights dropped), to be loaded only when no other model is loaded or
+  asleep, so nothing is displaced, and says so;
 - **refuses** if the request would make the server load a different model
   (override: `--allow-model-swap`), or if it cannot tell (override:
   `--allow-unknown-state`);
