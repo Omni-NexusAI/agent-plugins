@@ -1,0 +1,66 @@
+# Isolated Looped Mode test project. Start it only through run_tests.ps1,
+# which runs the preflight checks first.
+#
+# - Its own compose project (looped-test) and container names.
+# - One internal network: no internet, no host ports, nothing published.
+# - No GPU, no host drive mounts beyond this folder's .run directory.
+# - The image is never pulled: it must already be local.
+name: looped-test
+
+x-image: &image
+  image: ${LOOPED_TEST_IMAGE:-agent0ai/agent-zero:latest}
+  pull_policy: never
+  networks: [looped-test-net]
+  labels:
+    looped.test: "1"
+
+services:
+  looped-test-llm:
+    <<: *image
+    container_name: looped-test-llm
+    entrypoint: ["python3", "/stub/server.py", "8000"]
+    volumes:
+      - ./stub_llm:/stub:ro
+    cpus: "1.0"
+    mem_limit: 512m
+
+  looped-test-a0:
+    <<: *image
+    container_name: looped-test-a0
+    depends_on: [looped-test-llm]
+    environment:
+      # The tokenizer file is normally downloaded on first use; this network
+      # has no internet, so a local copy is mounted read-only instead.
+      TIKTOKEN_CACHE_DIR: /tiktoken-cache
+      # Placeholder values so the model client has something to send to the
+      # stub. They are not real keys and never leave the private network.
+      API_KEY_OTHER: looped-test-placeholder
+      OPENAI_API_KEY: looped-test-placeholder
+    volumes:
+      - ./.run/usr:/a0/usr
+      - ./seed/tiktoken-cache:/tiktoken-cache:ro
+    cpus: "4.0"
+    mem_limit: 8g
+
+  looped-test-driver:
+    <<: *image
+    container_name: looped-test-driver
+    profiles: ["run"]
+    depends_on: [looped-test-a0]
+    entrypoint: ["python3", "/testenv/driver.py"]
+    environment:
+      LOOPED_TEST_ONLY: ${LOOPED_TEST_ONLY:-}
+      LOOPED_TEST_BOOT_TIMEOUT: ${LOOPED_TEST_BOOT_TIMEOUT:-420}
+    volumes:
+      - ./driver.py:/testenv/driver.py:ro
+      - ./scenarios.py:/testenv/scenarios.py:ro
+      - ./.run/results:/results
+    cpus: "1.0"
+    mem_limit: 512m
+
+networks:
+  looped-test-net:
+    name: looped-test-net
+    internal: true
+    labels:
+      looped.test: "1"
