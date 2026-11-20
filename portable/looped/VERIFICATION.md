@@ -7,7 +7,7 @@ changes; do not list a path as verified without running it.
 
 ### Unit tests (host, no Agent Zero)
 
-`python -m unittest discover -s portable/looped/tests -p "test_*.py"`: 95 tests
+`python -m unittest discover -s portable/looped/tests -p "test_*.py"`: 97 tests
 pass (Python 3.13, 2026-11-20).
 
 - Core: step parsing and canonical keys, programmatic checks, settings merge,
@@ -21,8 +21,9 @@ pass (Python 3.13, 2026-11-20).
   `/looped` parsing and the backend command hook.
 - Packaging: `default_config.yaml` and the settings page defaults equal the
   core defaults; the assembled package is self-contained and compiles.
-- Benchmark: task generation and splits, scoring, statistics, the dry run, and
-  the live-model gate's refusals.
+- Benchmark: task generation and splits, scoring, statistics, the dry run, the
+  live-model gate's refusals (including waking a sleeping model only when no
+  other model is held), and stopping on a dead server with rows kept.
 
 `python portable/looped/assemble.py --check`: current.
 
@@ -63,6 +64,17 @@ about any real model.
 - **Any real model.** No strategy has been measured on a real model yet, so
   there is no evidence so far that Looped Mode improves results. The comparison
   with SenseNova-Loop-9B has not been run.
+
+  One live attempt was made on 2026-11-20 against the local router's
+  `swift-1.5-qwen38-27b-stream-200k-vision-mtp` preset (Qwen3.8-27B, thinking
+  off, one request at a time). A ten-task `plain` probe ran (arithmetic 3 of 5,
+  tool choice 5 of 5, about 3.5 s and 84 output tokens per request): far too
+  few tasks to mean anything. The full `dev` run then stopped about 28 minutes
+  in, during the fourth arm, when the machine's RTX 3060 dropped out
+  (`nvidia-smi`: "GPU is lost"). Whether the sustained load contributed is not
+  known. The harness at the time saved results only at the end, so the three
+  finished arithmetic arms were lost; it now saves each row as it finishes and
+  stops after three failed requests in a row.
 - **Browser rendering.** The settings page, the composer button and the
   composer-side `/looped` handling are served correctly but have not been
   opened in a browser. The test network publishes no port.

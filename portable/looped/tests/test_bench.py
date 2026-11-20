@@ -86,6 +86,28 @@ class DryRunTests(unittest.TestCase):
         self.assertIn("fixed", by_arm[("arith", "agree")])
         self.assertIn("| arith | agree |", run_bench.markdown(table, "t"))
 
+    def test_a_dead_server_stops_the_run_and_keeps_the_rows(self):
+        class Dying:
+            prompt_tokens = completion_tokens = 0
+
+            def __init__(self):
+                self.calls = 0
+
+            async def complete(self, messages, **kwargs):
+                self.calls += 1
+                if self.calls > 4:
+                    raise TimeoutError("no reply")
+                return '{"tool_name": "response", "tool_args": {"text": "1"}}', ""
+
+        items = task_sets.generated("arith", 20, 7, "dev")
+        client, kept = Dying(), []
+        with self.assertRaises(run_bench.ServerDown):
+            asyncio.run(run_bench.run_arm("plain", items, client, 1,
+                                          on_row=lambda arm, row: kept.append(row), max_errors=3))
+        self.assertEqual(client.calls, 7)       # 4 answered, 3 failed, then no more requests
+        self.assertEqual(len(kept), 7)
+        self.assertEqual(sum(row["outcome"].startswith("error") for row in kept), 3)
+
     def test_live_needs_an_endpoint_and_model(self):
         with self.assertRaises(SystemExit):
             run_bench.parse(["--live"])
@@ -122,6 +144,19 @@ class GateTests(unittest.TestCase):
         self.assertTrue(self.gate(self.UNKNOWN, typed="model-a", allow_unknown_state=True)[0])
         self.assertFalse(self.gate(self.DOWN, typed="model-a", allow_unknown_state=True,
                                    allow_model_swap=True, assume_yes=True)[0])
+
+    def test_a_sleeping_model_may_be_woken_only_when_nothing_else_is_held(self):
+        asleep = {"reachable": True, "listed": True, "loaded": False, "loaded_models": [],
+                  "sleeping_models": ["model-a"], "asleep": True, "note": ""}
+        allowed, text = self.gate(asleep, typed="model-a")
+        self.assertTrue(allowed)
+        self.assertIn("asleep", text)
+        other_asleep = dict(asleep, sleeping_models=["model-b"], asleep=False)
+        allowed, text = self.gate(other_asleep, typed="model-a")
+        self.assertFalse(allowed)
+        self.assertIn("model-b", text)
+        both = dict(asleep, loaded_models=["model-b"])
+        self.assertFalse(self.gate(both, typed="model-a")[0])
 
     def test_yes_skips_only_the_typing_not_the_safety_checks(self):
         self.assertTrue(self.gate(self.LOADED, assume_yes=True)[0])

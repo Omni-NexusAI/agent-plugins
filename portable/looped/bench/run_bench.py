@@ -64,13 +64,23 @@ def score(task: task_sets.Task, candidate) -> bool:
     return given.replace(",", "") == gold.replace(",", "")
 
 
+def given(candidate) -> str:
+    """What the chosen step said, shortened, for reading wrong answers afterwards."""
+    if not candidate.valid:
+        return "(invalid) " + str(candidate.raw)[:80]
+    if candidate.kind == "final":
+        return str(final_text(candidate.tool_args))[:80]
+    return f"{candidate.tool_name} {json.dumps(candidate.tool_args, sort_keys=True)[:80]}"
+
+
 async def episode(task: task_sets.Task, arm: dict[str, Any], client) -> dict[str, Any]:
     extra = reread.build(task.question, REREAD_ON) if arm["reread"] else None
     prompt = task_sets.messages(task, extra)
     raw, reasoning = await client.complete(prompt)
     if arm["settings"] is None:
         winner = check(build_candidate(raw, reasoning), tool_names=task_sets.TOOLS)
-        return {"id": task.id, "correct": score(task, winner), "calls": 1, "outcome": "plain"}
+        return {"id": task.id, "correct": score(task, winner), "calls": 1, "outcome": "plain",
+                "given": given(winner)}
     cfg = merge_config(arm["settings"])
 
     async def sample(variant: int):
@@ -84,21 +94,43 @@ async def episode(task: task_sets.Task, arm: dict[str, Any], client) -> dict[str
                       tool_names=task_sets.TOOLS)
     decision = await resolve_step(raw, reasoning, 0, ctx)
     return {"id": task.id, "correct": score(task, decision.winner),
-            "calls": 1 + decision.extra_calls, "outcome": decision.outcome}
+            "calls": 1 + decision.extra_calls, "outcome": decision.outcome,
+            "given": given(decision.winner)}
 
 
-async def run_arm(name: str, items: list[task_sets.Task], client, concurrency: int) -> dict[str, Any]:
+class ServerDown(RuntimeError):
+    """Several requests in a row failed: stop instead of waiting out every timeout."""
+
+
+async def run_arm(name: str, items: list[task_sets.Task], client, concurrency: int,
+                  on_row=None, max_errors: int = 3) -> dict[str, Any]:
     gate_ = asyncio.Semaphore(max(1, concurrency))
     started = time.monotonic()
+    done = streak = 0
 
     async def one(task):
+        nonlocal done, streak
         async with gate_:
+            if max_errors and streak >= max_errors:
+                return None                         # the run is being abandoned
             try:
-                return await episode(task, ARMS[name], client)
+                row = await episode(task, ARMS[name], client)
+                streak = 0
             except Exception as error:
-                return {"id": task.id, "correct": False, "calls": 1,
-                        "outcome": f"error: {type(error).__name__}"}
-    rows = await asyncio.gather(*(one(task) for task in items))
+                row = {"id": task.id, "correct": False, "calls": 1,
+                       "outcome": f"error: {type(error).__name__}"}
+                streak += 1
+            if on_row:
+                on_row(name, row)
+            done += 1
+            if done % 10 == 0 or done == len(items):
+                print(f"  [{name}] {done}/{len(items)} tasks, {time.monotonic() - started:.0f}s",
+                      file=sys.stderr, flush=True)
+            return row
+    rows = [row for row in await asyncio.gather(*(one(task) for task in items)) if row]
+    if max_errors and streak >= max_errors:
+        raise ServerDown(f"{streak} requests in a row failed in arm '{name}' "
+                         f"after {len(rows)} tasks; stopping")
     return {"arm": name, "rows": rows, "seconds": time.monotonic() - started,
             "prompt_tokens": client.prompt_tokens, "completion_tokens": client.completion_tokens}
 
@@ -139,7 +171,13 @@ def markdown(table: list[dict[str, Any]], title: str) -> str:
     return "\n".join(lines)
 
 
-async def run(args, make_client) -> list[dict[str, Any]]:
+async def run(args, make_client, details: dict[str, Any] | None = None,
+              checkpoint=None) -> list[dict[str, Any]]:
+    """Run every arm on every suite. Per-task rows go into ``details`` when given.
+
+    ``checkpoint(suite, arm, row)`` is called as each task finishes, so a run
+    that dies keeps what it measured.
+    """
     table = []
     for suite in args.suites:
         items = (task_sets.from_jsonl(Path(suite)) if suite.endswith(".jsonl")
@@ -147,9 +185,15 @@ async def run(args, make_client) -> list[dict[str, Any]]:
         if args.tasks and len(items) > args.tasks:
             items = items[:args.tasks]
         results = {}
+        stem = Path(suite).stem
         for name in args.arms:
-            results[name] = await run_arm(name, items, make_client(items), args.concurrency)
+            results[name] = await run_arm(
+                name, items, make_client(items), args.concurrency,
+                on_row=(lambda arm, row, stem=stem: checkpoint(stem, arm, row)) if checkpoint else None,
+                max_errors=getattr(args, "max_errors", 3))
         table.extend(summarise(Path(suite).stem, results))
+        if details is not None:
+            details[Path(suite).stem] = {name: result["rows"] for name, result in results.items()}
     return table
 
 
@@ -170,6 +214,12 @@ def parse(argv=None):
     parser.add_argument("--label", default="")
     parser.add_argument("--api-key-env", default="", help="environment variable holding the API key")
     parser.add_argument("--max-tokens", type=int, default=2048)
+    parser.add_argument("--timeout", type=float, default=180.0, help="seconds per request")
+    parser.add_argument("--max-errors", type=int, default=3,
+                        help="stop after this many failed requests in a row (0 = never)")
+    parser.add_argument("--thinking", choices=("default", "on", "off"), default="default",
+                        help="ask the chat template to reason first or not (llama.cpp "
+                             "chat_template_kwargs.enable_thinking); default leaves the server's setting")
     parser.add_argument("--allow-model-swap", action="store_true")
     parser.add_argument("--allow-unknown-state", action="store_true")
     parser.add_argument("--yes", action="store_true", help="skip the typed confirmation")
@@ -201,19 +251,36 @@ def main(argv=None) -> int:
                                  allow_unknown_state=args.allow_unknown_state,
                                  assume_yes=args.yes):
             return 2
-        title = f"{args.label or args.model} ({args.split} split, seed {args.seed})"
+        title = (f"{args.label or args.model} ({args.split} split, seed {args.seed}, "
+                 f"thinking {args.thinking})")
+
+        extra = ({} if args.thinking == "default" else
+                 {"chat_template_kwargs": {"enable_thinking": args.thinking == "on"}})
 
         def make_client(items):
-            return OpenAIClient(args.endpoint, args.model, key, max_tokens=args.max_tokens)
+            return OpenAIClient(args.endpoint, args.model, key, max_tokens=args.max_tokens,
+                                extra=extra, timeout=args.timeout)
 
-    table = asyncio.run(run(args, make_client))
-    report = markdown(table, title)
-    print(report)
     args.out.mkdir(parents=True, exist_ok=True)
     stem = ("dry-run" if args.dry_run else (args.label or args.model).replace("/", "_")) \
         + f"-{args.split}-{time.strftime('%Y%m%d-%H%M%S')}"
+    partial = args.out / f"{stem}.rows.jsonl"
+
+    def checkpoint(suite: str, arm: str, row: dict[str, Any]) -> None:
+        with partial.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"suite": suite, "arm": arm, **row}) + "\n")
+
+    details: dict[str, Any] = {}
+    try:
+        table = asyncio.run(run(args, make_client, details, checkpoint))
+    except ServerDown as error:
+        print(f"\nSTOPPED: {error}.\nRows measured so far are in {partial}", file=sys.stderr)
+        return 3
+    report = markdown(table, title)
+    print(report)
     (args.out / f"{stem}.json").write_text(json.dumps(
-        {"title": title, "args": {k: str(v) for k, v in vars(args).items()}, "table": table},
+        {"title": title, "args": {k: str(v) for k, v in vars(args).items()}, "table": table,
+         "rows": details},
         indent=2), encoding="utf-8")
     (args.out / f"{stem}.md").write_text(report + "\n", encoding="utf-8")
     print(f"\nSaved: {args.out / (stem + '.md')}")

@@ -31,7 +31,7 @@ def model_state(endpoint: str, model: str, api_key: str = "", timeout: float = 8
     entries = data.get("data") if isinstance(data, dict) else None
     if not isinstance(entries, list):
         return {"reachable": True, "listed": None, "loaded": None, "note": "unexpected reply"}
-    loaded_ids, listed = [], False
+    loaded_ids, sleeping_ids, listed = [], [], False
     for entry in entries:
         if not isinstance(entry, dict):
             continue
@@ -41,10 +41,13 @@ def model_state(endpoint: str, model: str, api_key: str = "", timeout: float = 8
             listed = True
         if value == "loaded":
             loaded_ids.append(entry.get("id"))
+        elif value == "sleeping":       # router keeps the model's process, weights dropped when idle
+            sleeping_ids.append(entry.get("id"))
     statuses_known = any(isinstance(entry, dict) and "status" in entry for entry in entries)
     loaded = (model in loaded_ids) if statuses_known else None
     return {"reachable": True, "listed": listed, "loaded": loaded,
-            "loaded_models": loaded_ids, "note": ""}
+            "loaded_models": loaded_ids, "sleeping_models": sleeping_ids,
+            "asleep": model in sleeping_ids, "note": ""}
 
 
 def confirm_live(endpoint: str, model: str, requests: int, concurrency: int, *,
@@ -64,11 +67,17 @@ def confirm_live(endpoint: str, model: str, requests: int, concurrency: int, *,
         say(f"  server:       not reachable ({state['note']})")
         say("Refusing: the server could not be reached.")
         return False
+    held = [str(item) for item in (state.get("loaded_models") or []) + (state.get("sleeping_models") or [])
+            if item != model]
     if state["loaded"] is True:
         say("  model state:  already loaded (no model swap)")
+    elif state["loaded"] is False and state.get("asleep") and not held:
+        say("  model state:  asleep (idle). The first request wakes it and reloads it into GPU")
+        say("                memory, which can take a minute. No other model is loaded or asleep,")
+        say("                so nothing is displaced.")
     elif state["loaded"] is False:
-        others = ", ".join(str(item) for item in state.get("loaded_models") or []) or "none"
-        say(f"  model state:  NOT loaded. Currently loaded: {others}")
+        others = ", ".join(held) or "none"
+        say(f"  model state:  NOT loaded. Currently loaded or asleep: {others}")
         say("  A request would make the server load this model and may unload the one in use.")
         if not allow_model_swap:
             say("Refusing: pass --allow-model-swap to permit loading a different model.")

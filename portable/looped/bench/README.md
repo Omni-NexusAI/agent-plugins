@@ -30,7 +30,15 @@ the same questions finds luck, not improvement.
 
 Accuracy with a 95% bootstrap interval, tasks fixed and broken relative to
 `plain`, an exact McNemar p-value, model calls per task, and wall time. Saved as
-JSON and Markdown under `results/` (not committed).
+JSON and Markdown under `results/` (not committed). The JSON also holds one row
+per task and arm (correct or not, calls, outcome, and the chosen answer
+shortened to 80 characters). Progress goes to stderr every ten tasks.
+
+Each row is also appended to `results/<name>.rows.jsonl` the moment its task
+finishes, so a run that dies keeps what it measured. A request that gets no
+reply within `--timeout` seconds (default 180) counts as an error, and after
+`--max-errors` errors in a row (default 3) the run stops with exit code 3
+instead of waiting out a timeout for every remaining task.
 
 ## Dry run
 
@@ -52,6 +60,8 @@ Before the first request the gate (`gate.py`):
 
 - prints the endpoint, model, request count and concurrency;
 - checks, read-only, whether that model is the one already loaded;
+- allows a model the router reports as `sleeping` (idle, weights dropped) to be
+  woken only when no other model is loaded or asleep, and says so;
 - **refuses** if the request would make the server load a different model
   (override: `--allow-model-swap`), or if it cannot tell (override:
   `--allow-unknown-state`);
@@ -71,5 +81,7 @@ to results.
 3. A similar-size ordinary model (about 9B): all arms. This is the size-matched
    test of "plugin versus a built-in loop".
 
-A thinking-on control is not built in: run the same command against a preset
-with reasoning enabled and compare.
+`--thinking on|off` sets llama.cpp's `chat_template_kwargs.enable_thinking`
+for every request (`default` leaves the server's setting). Run the arms with
+`--thinking off`, then `--arms plain --thinking on` as the matched-compute
+control: reasoning first is the other way to spend extra tokens on a step.
