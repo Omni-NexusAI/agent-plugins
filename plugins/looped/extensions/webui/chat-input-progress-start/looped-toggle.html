@@ -1,0 +1,41 @@
+<!-- Looped Mode: per-chat mode button and one-shot arm -->
+<div x-data="{
+  mode: null, defaultMode: 'manual', armed: false, ready: false,
+  labels: { off: 'Off', manual: 'Manual', auto: 'Auto', always: 'Always' },
+  get chat() { return globalThis.Alpine?.store('chats')?.selected || ''; },
+  get shown() { return this.labels[this.mode || this.defaultMode] || 'Manual'; },
+  async call(body) {
+    if (!this.chat) return null;
+    try {
+      const { callJsonApi } = await import('/js/api.js');
+      const result = await callJsonApi('/plugins/looped/mode', { context_id: this.chat, ...body });
+      if (result && result.ok) {
+        this.mode = result.mode; this.defaultMode = result.default_mode;
+        this.armed = result.armed; this.ready = true;
+      }
+      return result;
+    } catch (error) { this.ready = false; return null; }
+  },
+  async refresh() { this.ready = false; await this.call({ action: 'get' }); },
+  async cycle() {
+    const order = [null, 'off', 'auto', 'always'];
+    const next = order[(order.indexOf(this.mode) + 1) % order.length];
+    await this.call({ action: 'set', mode: next || 'default' });
+  },
+  async arm() { await this.call({ action: 'arm', armed: !this.armed }); }
+}" x-init="refresh(); $watch('$store.chats.selected', () => refresh())">
+  <template x-if="ready">
+    <span class="looped-toggle" style="display:inline-flex;align-items:center;gap:2px">
+      <button class="btn-icon-action" type="button" @click="cycle()"
+              :title="'Looped mode: ' + shown + (mode ? ' (this chat)' : ' (default)') + '. Click to change.'">
+        <x-icon style="font-size: 16px;" name="repeat"></x-icon>
+        <span style="font-size: 0.75rem" x-text="shown"></span>
+      </button>
+      <button class="btn-icon-action" type="button" @click="arm()"
+              :style="armed ? 'color: var(--color-highlight, #4caf50)' : ''"
+              :title="armed ? 'Looped mode is armed for your next message. Click to cancel.' : 'Arm looped mode for your next message.'">
+        <span style="font-size: 0.75rem">1&times;</span>
+      </button>
+    </span>
+  </template>
+</div>

@@ -3,7 +3,8 @@
 ## Purpose
 
 `portable/` owns source for future plugins shared across agent frameworks.
-Convo and System 1 are planned; this phase creates no placeholder plugins.
+Looped Mode has a portable core and an Agent Zero adapter. Convo and System 1
+are planned; no placeholder plugins are kept.
 
 ## Local Contracts
 
@@ -20,3 +21,8 @@ Convo and System 1 are planned; this phase creates no placeholder plugins.
 
 - For each future adapter, test its assembled output outside this checkout.
 - Keep the repository catalog, README, and adapter documentation aligned.
+
+## Child DOX Index
+
+- `looped/AGENTS.md`: looped-mode strategies, Agent Zero adapter, isolated test
+  project, benchmark, and independent assembly.

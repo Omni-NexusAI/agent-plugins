@@ -1,0 +1,5 @@
+name: looped
+description: Look twice at this message's steps, or set looped mode for the chat.
+argument_hint: "[on|off|auto|always|manual|status] [message]"
+type: script
+script_path: looped_command.py

@@ -1,0 +1,8 @@
+name: looped
+title: Looped Mode
+description: Gives any model a second look at its steps - agreement between passes before tool calls, task re-read, merged final answers - with always, auto and manual control.
+version: 0.1.0
+settings_sections:
+  - agent
+per_project_config: true
+per_agent_config: true

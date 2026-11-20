@@ -1,8 +1,9 @@
 # Portable plugin sources
 
 This directory is reserved for plugins that can support more than one agent
-framework. Convo and System 1 are planned here; no plugin implementations or
-installable packages have been added yet.
+framework. Looped Mode (`looped/`) is the first implementation: a
+framework-independent core, an Agent Zero adapter, and an `assemble.py` that
+builds `plugins/looped/`. Convo and System 1 are planned here.
 
 Each future plugin uses `portable/<plugin>/core/` for framework-independent
 logic and `portable/<plugin>/adapters/<framework>/` for host integration.
