@@ -7,7 +7,7 @@ changes; do not list a path as verified without running it.
 
 ### Unit tests (host, no Agent Zero)
 
-`python -m unittest discover -s portable/looped/tests -p "test_*.py"`: 100 tests
+`python -m unittest discover -s portable/looped/tests -p "test_*.py"`: 102 tests
 pass (Python 3.13, 2026-11-20).
 
 - Core: step parsing and canonical keys, programmatic checks, settings merge,
@@ -24,7 +24,8 @@ pass (Python 3.13, 2026-11-20).
 - Benchmark: task generation and splits, scoring, statistics, the dry run, the
   live-model gate's refusals (including waking a sleeping model only when no
   other model is held, reading a router's `/status` reply, and the in-use
-  warning), and stopping on a dead server with rows kept.
+  warning), stopping on a dead server with rows kept, the shared first pass,
+  and counting malformed replies apart from wrong answers.
 
 `python portable/looped/assemble.py --check`: current.
 
@@ -110,11 +111,58 @@ a reasoning gain for it; that needs harder questions (a real dataset subset) or
 a weaker model. The tool suites and `arith_chain` were therefore not run on
 `heldout`.
 
+### Same model, harder questions (MMLU-Pro): still no reasoning effect
+
+2026-11-20, same model and router. Questions: a fixed sample of MMLU-Pro
+(ten-choice, 14 subjects) fetched with `bench/prepare_datasets.py`, seed 7.
+Calibration on 30 `dev` questions, `plain` only, chose the set and the limits:
+MMLU-Pro 16 of 30 at about a minute per request; GSM8K 29 of 30 (the miss was
+"5.00" scored against "5", since fixed), so GSM8K is too easy for this model
+and was not run further.
+
+Main run: 60 `heldout` questions (every second one, all 14 subjects),
+`--share-first-pass`, `--max-tokens 3000`, defaults otherwise. Only `plain` and
+`agree` were run; the other arms and the other 60 questions were left out to
+keep the run near two hours.
+
+| Arm | n | Accuracy | 95% CI | Fixed | Broke | p vs plain | Malformed | Cut off | Calls/task |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| plain | 60 | 70.0% | 58.3% to 81.7% | - | - | - | 18 | 8 | 1.00 |
+| agree | 60 | 78.3% | 68.3% to 88.3% | 5 | 0 | 0.06 | 12 | 9 | 2.00 |
+
+How to read it:
+
+- **The gain is not significant at this size** (5 fixed, 0 broken, exact
+  McNemar p = 0.06), and it cost twice the calls.
+- **Every `plain` miss was an unusable reply, not a wrong step.** 8 replies
+  were empty because the model was still reasoning at the token limit, and 10
+  were a bare letter instead of the JSON step (8 of those letters were right).
+  All 42 valid steps were correct.
+- **All five fixes replaced an unusable first reply with a valid second one:**
+  three bare letters that were already right, and two cut-off replies whose
+  second attempt finished and was right. One more cut-off reply was replaced by
+  a valid wrong answer.
+- **Agreement never changed a valid answer.** Whenever both passes were valid
+  (32 questions) they agreed, so the tie-break never ran. On this model a
+  second sample repeats the first; it does not catch reasoning errors.
+- **The second pass is no more reliable than the first.** It was unusable 22
+  times in 60 (first pass: 18). In 12 questions both were unusable and the
+  miss stood; 5 of those held a correct bare letter.
+- As before, Agent Zero would itself ask again after an unusable reply, so the
+  gain inside a real agent is smaller than the table suggests.
+
+What this suggests for the plugin, not yet built or tested: for this kind of
+model the useful second look is a cheap format repair ("send that again as a
+step") and a retry when a reply is cut off, not a second opinion.
+
 ## Not verified
 
-- **Better reasoning on any real model.** The run above shows repaired step
-  format only. No strategy has been shown to turn a wrong answer into a right
-  one on a real model. The comparison with SenseNova-Loop-9B has not been run.
+- **Better reasoning on any real model.** Both runs above show unusable
+  replies being replaced, nothing more. No strategy has been shown to turn a
+  valid wrong answer into a right one on a real model: the one model measured
+  either answers correctly or fails to answer. `deepen`, `reread` and `stack`
+  were not run on MMLU-Pro. The comparison with SenseNova-Loop-9B has not been
+  run.
 
   Two live attempts were made on 2026-11-20 against the local router's
   `swift-1.5-qwen38-27b-stream-200k-vision-mtp` preset (Qwen3.8-27B Q4_K_S,

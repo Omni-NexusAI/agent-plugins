@@ -22,6 +22,7 @@ class OpenAIClient:
         self.calls = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
+        self.cut = 0                        # replies that hit max_tokens
 
     def _post(self, body: dict[str, Any]) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}
@@ -47,7 +48,10 @@ class OpenAIClient:
         usage = reply.get("usage") or {}
         self.prompt_tokens += int(usage.get("prompt_tokens") or 0)
         self.completion_tokens += int(usage.get("completion_tokens") or 0)
-        message = (reply.get("choices") or [{}])[0].get("message") or {}
+        choice = (reply.get("choices") or [{}])[0]
+        if choice.get("finish_reason") == "length":
+            self.cut += 1
+        message = choice.get("message") or {}
         return message.get("content") or "", message.get("reasoning_content") or ""
 
 

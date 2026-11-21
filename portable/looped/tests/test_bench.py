@@ -45,6 +45,8 @@ class ScoreTests(unittest.TestCase):
         tool = task_sets.Task("c", "tool", "q", tool_name="read_file", tool_args={"path": "a.txt"})
         self.assertTrue(run_bench.score(number, build_candidate(final("**1234**."))))
         self.assertFalse(run_bench.score(number, build_candidate(final("1235"))))
+        self.assertTrue(run_bench.score(task_sets.Task("d", "qa", "q", answer="5"),
+                                        build_candidate(final("5.00"))))
         self.assertTrue(run_bench.score(letter, build_candidate(final("B. y"))))
         self.assertFalse(run_bench.score(letter, build_candidate(final("Because"))))
         self.assertTrue(run_bench.score(tool, build_candidate(step("read_file", path="a.txt "))))
@@ -85,6 +87,37 @@ class DryRunTests(unittest.TestCase):
         self.assertEqual(by_arm[("tool", "deepen")]["calls_per_task"], 2.0)
         self.assertIn("fixed", by_arm[("arith", "agree")])
         self.assertIn("| arith | agree |", run_bench.markdown(table, "t"))
+
+    def test_shared_first_pass_reuses_the_plain_reply(self):
+        class Counting:
+            prompt_tokens = completion_tokens = 0
+
+            def __init__(self):
+                self.calls = 0
+
+            async def complete(self, messages, **kwargs):
+                self.calls += 1
+                return '{"tool_name": "response", "tool_args": {"text": "%d"}}' % self.calls, ""
+
+        items = task_sets.generated("arith", 3, 7, "dev")
+        firsts, plain, agree = {}, Counting(), Counting()
+        asyncio.run(run_bench.run_arm("plain", items, plain, 1, firsts=firsts))
+        self.assertEqual(set(firsts), {task.id for task in items})
+        result = asyncio.run(run_bench.run_arm("agree", items, agree, 1, firsts=firsts))
+        self.assertEqual(sum(row["calls"] for row in result["rows"]) - len(items), agree.calls)
+        self.assertGreaterEqual(agree.calls, len(items))        # second passes only
+        separate = Counting()
+        asyncio.run(run_bench.run_arm("reread", items, separate, 1, firsts=firsts))
+        self.assertEqual(separate.calls, len(items))            # different prompt: not shared
+
+    def test_malformed_replies_are_counted_apart_from_wrong_answers(self):
+        rows = [{"correct": True, "calls": 1, "outcome": "plain", "given": "7"},
+                {"correct": False, "calls": 1, "outcome": "plain", "given": "(invalid) 7"},
+                {"correct": False, "calls": 1, "outcome": "plain", "given": "8"}]
+        result = {"rows": rows, "seconds": 1.0, "prompt_tokens": 0, "completion_tokens": 0}
+        table = run_bench.summarise("s", {"plain": result})
+        self.assertEqual(table[0]["malformed"], 1)
+        self.assertIn("| Malformed |", run_bench.markdown(table, "t"))
 
     def test_a_dead_server_stops_the_run_and_keeps_the_rows(self):
         class Dying:

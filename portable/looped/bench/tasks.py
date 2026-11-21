@@ -208,7 +208,7 @@ def from_jsonl(path: Path, suite: str | None = None) -> list[Task]:
         if isinstance(choices, list) and choices:
             letters = "ABCDEFGHIJ"
             question += "\n" + "\n".join(f"{letters[i]}. {choice}" for i, choice in enumerate(choices))
-            question += "\nAnswer with the letter only."
+            question += "\nPut just the letter of the correct choice in the answer text."
         tasks.append(Task(id=str(row.get("id", f"{path.stem}-{number}")),
                           kind=row.get("kind", "qa"), question=question,
                           answer=str(row.get("answer", "")),

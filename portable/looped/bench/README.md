@@ -22,8 +22,12 @@ by task.
 - `arith_chain`: seven or eight dependent steps, including a remainder.
 - `tool`: generated requests that map to one mock tool with exact arguments.
 - `tool_hard`: the same with a distractor file, person or action in the request.
-- Any `.jsonl` file (format in `tasks.py`), for real datasets such as MMLU-Pro,
-  GSM8K or ARC-Challenge subsets. None are bundled or downloaded.
+- Any `.jsonl` file (format in `tasks.py`), for real datasets. None are
+  bundled. `prepare_datasets.py gsm8k|mmlu_pro --raw EMPTY_FOLDER` downloads a
+  fixed sample of GSM8K or MMLU-Pro (both MIT licensed, about 1 MB together)
+  and writes `data/<name>-dev.jsonl` and `data/<name>-heldout.jsonl`, 120
+  questions each; `data/` is not committed. A `.jsonl` suite runs the first
+  `--tasks` questions of the file; `--split` does not apply to it.
 
 `arith` and `arith_hard` end with "Answer with the number only", which leads
 some models to reply with a bare number instead of a step. That counts as a
@@ -39,7 +43,9 @@ the same questions finds luck, not improvement.
 ## Output
 
 Accuracy with a 95% bootstrap interval, tasks fixed and broken relative to
-`plain`, an exact McNemar p-value, model calls per task, and wall time. Saved as
+`plain`, an exact McNemar p-value, the number of malformed replies (not a
+usable step: a format slip or an empty reply, counted as a miss), the number of
+replies cut off by `--max-tokens`, model calls per task, and wall time. Saved as
 JSON and Markdown under `results/` (not committed). The JSON also holds one row
 per task and arm (correct or not, calls, outcome, and the chosen answer
 shortened to 80 characters). Progress goes to stderr every ten tasks.
@@ -50,6 +56,14 @@ reply within `--timeout` seconds (default 180) counts as an error, and after
 `--max-errors` errors in a row (default 3) the run stops with exit code 3
 instead of waiting out a timeout for every remaining task. `--pause SECONDS`
 idles after each request, to go easy on a shared or fragile server.
+
+`--share-first-pass` makes `agree` and `deepen` take their first pass from the
+`plain` arm's reply for the same task instead of sampling again (list `plain`
+first). This is what the plugin does, where the host's own call is the first
+pass, and it removes sampling noise from the comparison: a task counts as fixed
+or broken only when the strategy changed the step. The shared call is still
+counted in calls per task. `reread` and `stack` send a different prompt, so
+they always sample for themselves.
 
 ## Dry run
 

@@ -59,6 +59,10 @@ def score(task: task_sets.Task, candidate) -> bool:
     given, gold = normalise_answer(final_text(candidate.tool_args)), normalise_answer(task.answer)
     if given == gold:
         return True
+    try:                                            # 5.00 and 5 are the same answer
+        return float(given.replace(",", "")) == float(gold.replace(",", ""))
+    except ValueError:
+        pass
     if len(gold) == 1 and gold.isalpha():          # multiple choice letter
         return given[:1] == gold and (len(given) == 1 or not given[1].isalnum())
     return given.replace(",", "") == gold.replace(",", "")
@@ -73,10 +77,23 @@ def given(candidate) -> str:
     return f"{candidate.tool_name} {json.dumps(candidate.tool_args, sort_keys=True)[:80]}"
 
 
-async def episode(task: task_sets.Task, arm: dict[str, Any], client) -> dict[str, Any]:
+async def episode(task: task_sets.Task, arm: dict[str, Any], client,
+                  firsts: dict[str, tuple[str, str]] | None = None) -> dict[str, Any]:
+    """One task in one arm.
+
+    ``firsts`` holds the plain arm's replies by task id. The plain arm fills
+    it; an arm that sends the same prompt takes its first pass from it instead
+    of sampling again, so any difference from plain is the strategy's doing.
+    """
     extra = reread.build(task.question, REREAD_ON) if arm["reread"] else None
     prompt = task_sets.messages(task, extra)
-    raw, reasoning = await client.complete(prompt)
+    shared = firsts is not None and not arm["reread"] and arm["settings"] is not None
+    if shared and task.id in firsts:
+        raw, reasoning = firsts[task.id]
+    else:
+        raw, reasoning = await client.complete(prompt)
+    if firsts is not None and arm["settings"] is None and not arm["reread"]:
+        firsts[task.id] = (raw, reasoning)
     if arm["settings"] is None:
         winner = check(build_candidate(raw, reasoning), tool_names=task_sets.TOOLS)
         return {"id": task.id, "correct": score(task, winner), "calls": 1, "outcome": "plain",
@@ -103,7 +120,8 @@ class ServerDown(RuntimeError):
 
 
 async def run_arm(name: str, items: list[task_sets.Task], client, concurrency: int,
-                  on_row=None, max_errors: int = 3) -> dict[str, Any]:
+                  on_row=None, max_errors: int = 3,
+                  firsts: dict[str, tuple[str, str]] | None = None) -> dict[str, Any]:
     gate_ = asyncio.Semaphore(max(1, concurrency))
     started = time.monotonic()
     done = streak = 0
@@ -114,7 +132,7 @@ async def run_arm(name: str, items: list[task_sets.Task], client, concurrency: i
             if max_errors and streak >= max_errors:
                 return None                         # the run is being abandoned
             try:
-                row = await episode(task, ARMS[name], client)
+                row = await episode(task, ARMS[name], client, firsts)
                 streak = 0
             except Exception as error:
                 row = {"id": task.id, "correct": False, "calls": 1,
@@ -132,7 +150,8 @@ async def run_arm(name: str, items: list[task_sets.Task], client, concurrency: i
         raise ServerDown(f"{streak} requests in a row failed in arm '{name}' "
                          f"after {len(rows)} tasks; stopping")
     return {"arm": name, "rows": rows, "seconds": time.monotonic() - started,
-            "prompt_tokens": client.prompt_tokens, "completion_tokens": client.completion_tokens}
+            "prompt_tokens": client.prompt_tokens, "completion_tokens": client.completion_tokens,
+            "cut": getattr(client, "cut", 0)}
 
 
 def summarise(suite: str, results: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
@@ -147,7 +166,11 @@ def summarise(suite: str, results: dict[str, dict[str, Any]]) -> list[dict[str, 
                "calls_per_task": sum(r["calls"] for r in result["rows"]) / max(1, len(outcomes)),
                "seconds": result["seconds"], "prompt_tokens": result["prompt_tokens"],
                "completion_tokens": result["completion_tokens"],
-               "errors": sum(1 for r in result["rows"] if r["outcome"].startswith("error"))}
+               "errors": sum(1 for r in result["rows"] if r["outcome"].startswith("error")),
+               "cut": result.get("cut", 0),         # replies that ran into --max-tokens
+               # a reply that is not a usable step: a format slip, not a wrong answer
+               "malformed": sum(1 for r in result["rows"]
+                                if str(r.get("given", "")).startswith("(invalid)"))}
         if baseline is not None and name != "plain":
             row.update(stats.paired(baseline, outcomes))
         table.append(row)
@@ -156,8 +179,9 @@ def summarise(suite: str, results: dict[str, dict[str, Any]]) -> list[dict[str, 
 
 def markdown(table: list[dict[str, Any]], title: str) -> str:
     lines = [f"### {title}", "",
-             "| Suite | Arm | n | Accuracy | 95% CI | Fixed | Broke | p vs plain | Calls/task | Time (s) |",
-             "| --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |"]
+             "| Suite | Arm | n | Accuracy | 95% CI | Fixed | Broke | p vs plain | Malformed | "
+             "Cut off | Calls/task | Time (s) |",
+             "| --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
     for row in table:
         paired = "fixed" in row
         lines.append(
@@ -167,7 +191,8 @@ def markdown(table: list[dict[str, Any]], title: str) -> str:
             f"{row['p']:.3f} | " if paired else
             f"| {row['suite']} | {row['arm']} | {row['n']} | {row['accuracy']:.1%} | "
             f"{row['ci_low']:.1%} to {row['ci_high']:.1%} | - | - | - | ")
-        lines[-1] += f"{row['calls_per_task']:.2f} | {row['seconds']:.1f} |"
+        lines[-1] += (f"{row.get('malformed', 0)} | {row.get('cut', 0)} | "
+                      f"{row['calls_per_task']:.2f} | {row['seconds']:.1f} |")
     return "\n".join(lines)
 
 
@@ -186,11 +211,12 @@ async def run(args, make_client, details: dict[str, Any] | None = None,
             items = items[:args.tasks]
         results = {}
         stem = Path(suite).stem
+        firsts = {} if getattr(args, "share_first_pass", False) else None
         for name in args.arms:
             results[name] = await run_arm(
                 name, items, make_client(items), args.concurrency,
                 on_row=(lambda arm, row, stem=stem: checkpoint(stem, arm, row)) if checkpoint else None,
-                max_errors=getattr(args, "max_errors", 3))
+                max_errors=getattr(args, "max_errors", 3), firsts=firsts)
         table.extend(summarise(Path(suite).stem, results))
         if details is not None:
             details[Path(suite).stem] = {name: result["rows"] for name, result in results.items()}
@@ -220,6 +246,9 @@ def parse(argv=None):
                         help="idle seconds after each request, to go easy on a shared server")
     parser.add_argument("--max-errors", type=int, default=3,
                         help="stop after this many failed requests in a row (0 = never)")
+    parser.add_argument("--share-first-pass", action="store_true",
+                        help="agree and deepen take their first pass from the plain arm's reply "
+                             "instead of sampling again (run plain first); calls still count it")
     parser.add_argument("--thinking", choices=("default", "on", "off"), default="default",
                         help="ask the chat template to reason first or not (llama.cpp "
                              "chat_template_kwargs.enable_thinking); default leaves the server's setting")
