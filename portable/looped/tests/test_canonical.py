@@ -18,6 +18,29 @@ class ParseTests(unittest.TestCase):
         self.assertIsNone(parse_step("{broken"))
         self.assertIsNone(parse_step(None))
 
+    def test_salvages_the_call_when_earlier_fields_are_damaged(self):
+        call = '"tool_name": "response", "tool_args": {"text": "F"}'
+        unclosed_list = '{"thoughts": ["a long thought.", "headline": "h", ' + call + "}}"
+        self.assertEqual(parse_step(unclosed_list), {"tool_name": "response", "tool_args": {"text": "F"}})
+        bad_escape = '{"thoughts": ["find $2^{87} \\pmod 7$"], "headline": "h", ' + call + "}"
+        self.assertEqual(parse_step(bad_escape)["tool_args"], {"text": "F"})
+        self.assertIsNone(parse_step(unclosed_list, salvage=False))
+        nested = ('{"thoughts": ["x", "tool_name": "run_shell", '
+                  '"tool_args": {"command": "echo \\"}\\" {", "env": {"A": 1}}}}\n```')
+        self.assertEqual(parse_step(nested)["tool_args"], {"command": 'echo "}" {', "env": {"A": 1}})
+
+    def test_salvage_needs_a_whole_call_at_the_very_end(self):
+        call = '"tool_name": "response", "tool_args": {"text": "F"}'
+        # A call quoted in the prose, with the real ending missing or cut off, is not a step.
+        self.assertIsNone(parse_step('{"thoughts": ["I could send ' + call.replace('"', "'") + '"'))
+        self.assertIsNone(parse_step('{"thoughts": ["x", ' + call + ', "note": "then more'))
+        self.assertIsNone(parse_step('{"thoughts": ["x", ' + call + "} and then I will stop."))
+        self.assertIsNone(parse_step('{"thoughts": ["x", "tool_name": "response", "tool_args": {"text": "F'))
+        self.assertIsNone(parse_step('{"thoughts": ["x", "tool_name": "response", "tool_args": "F"}'))
+        # When two calls appear, only the last one, at the end, counts.
+        two = '{"thoughts": ["x", "tool_name": "a", "tool_args": {"n": 1}, ' + call + "}}"
+        self.assertEqual(parse_step(two)["tool_name"], "response")
+
 
 class KeyTests(unittest.TestCase):
     def test_cosmetic_differences_do_not_change_the_key(self):

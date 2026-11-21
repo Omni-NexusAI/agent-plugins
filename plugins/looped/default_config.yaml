@@ -25,6 +25,12 @@ strategies:
     max_per_turn: 2
   deepen:
     enabled: false
+  escalate:
+    enabled: false
+    reasoning_params:
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: true
   plan_branch:
     enabled: false
     branches: 2

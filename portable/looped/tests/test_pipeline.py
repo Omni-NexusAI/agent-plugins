@@ -161,6 +161,69 @@ class EarlySecondTests(unittest.TestCase):
         self.assertTrue(task.cancelled())
 
 
+class EscalateTests(unittest.TestCase):
+    SETTINGS = {"mode": "always", "strategies": {"escalate": {"enabled": True}}}
+
+    def resolve(self, first, model, settings=None, **kwargs):
+        ctx = context(model, settings or self.SETTINGS, think=model.think, **kwargs)
+        return run(resolve_step(first, "", 0, ctx))
+
+    def test_agreeing_quick_passes_do_not_reason(self):
+        a = step("write", path="a")
+        model = FakeModel(samples=[a])
+        decision = self.resolve(a, model)
+        self.assertEqual((decision.strategy, decision.outcome, decision.extra_calls),
+                         ("escalate", "agreed", 1))
+        self.assertEqual(model.think_calls, 0)
+
+    def test_disagreement_is_settled_by_the_reasoned_pass(self):
+        a, b, c = step("write", path="a"), step("write", path="b"), step("write", path="c")
+        model = FakeModel(samples=[b], thinks=[c])
+        decision = self.resolve(a, model)
+        self.assertEqual((decision.outcome, decision.winner.label, decision.extra_calls),
+                         ("reasoned", "T", 2))
+        self.assertEqual(model.sample_calls, [1])            # no third quick sample
+        model = FakeModel(samples=[b], thinks=[a])
+        decision = self.resolve(a, model)
+        self.assertEqual((decision.outcome, decision.winner.label), ("reasoned_same", "A"))
+        self.assertFalse(decision.changed)
+
+    def test_an_unusable_quick_pass_also_triggers_reasoning(self):
+        a, c = step("write", path="a"), step("write", path="c")
+        decision = self.resolve("junk", FakeModel(samples=[a], thinks=[c]))
+        self.assertEqual((decision.outcome, decision.winner.label), ("reasoned", "T"))
+        decision = self.resolve(a, FakeModel(samples=["junk"], thinks=[c]))
+        self.assertEqual((decision.outcome, decision.winner.label), ("reasoned", "T"))
+
+    def test_an_unusable_reasoned_pass_keeps_the_best_quick_one(self):
+        a, b = step("write", path="a"), step("write", path="b")
+        decision = self.resolve(a, FakeModel(samples=[b], thinks=["junk"]))
+        self.assertEqual((decision.outcome, decision.winner.label), ("reasoning_unusable", "A"))
+        decision = self.resolve("junk", FakeModel(samples=[b], thinks=[RuntimeError("down")]))
+        self.assertEqual((decision.outcome, decision.winner.label), ("reasoning_unusable", "B"))
+
+    def test_no_budget_means_no_reasoning(self):
+        a, b = step("write", path="a"), step("write", path="b")
+        settings = {"mode": "always", "budget": {"allow_tiebreak": False},
+                    "strategies": {"escalate": {"enabled": True}}}
+        model = FakeModel(samples=[b])
+        decision = self.resolve(a, model, settings)
+        self.assertEqual((decision.outcome, decision.winner.label, model.think_calls),
+                         ("unsure_no_budget", "A", 0))
+
+    def test_long_final_answers_are_merged_not_reasoned(self):
+        model = FakeModel(samples=[final(LONG_B)], asks=[final("merged")], thinks=[final("x")])
+        decision = self.resolve(final(LONG_A), model)
+        self.assertEqual((decision.outcome, model.think_calls), ("fused", 0))
+
+    def test_a_host_that_cannot_reason_falls_back_to_agreement(self):
+        a, b = step("write", path="a"), step("write", path="b")
+        model = FakeModel(samples=[b, b])
+        decision = run(resolve_step(a, "", 0, context(model, self.SETTINGS)))
+        self.assertEqual((decision.strategy, decision.outcome, decision.winner.label),
+                         ("agree", "tiebreak", "B"))
+
+
 class DeepenTests(unittest.TestCase):
     SETTINGS = {"mode": "always", "strategies": {"deepen": {"enabled": True}}}
 

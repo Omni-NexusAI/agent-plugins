@@ -13,7 +13,7 @@
     }
   },
   ready(config) {
-    const DEFAULTS = {"mode":"manual","apply_to_subordinates":false,"execution":"auto","show_steps":"all","budget":{"max_extra_calls_per_step":1,"allow_tiebreak":true,"max_extra_calls_per_turn":8},"sampling":{"temperature":0.7,"seed_base":1000},"strategies":{"reread":{"enabled":true,"when":"non_thinking","max_chars":4000},"agree":{"enabled":true},"fuse":{"enabled":true,"min_chars":400},"retry":{"enabled":true,"max_per_turn":2},"deepen":{"enabled":false},"plan_branch":{"enabled":false,"branches":2,"max_chars":2000}},"auto":{"checkpoints":["first_step","risky_tool","final_response","after_error","invalid_step"],"risky_tools":["code_execution_tool","input","text_editor","memory_save","memory_delete","memory_forget","behaviour_adjustment","call_subordinate","scheduler","browser_agent","browser","a2a_chat","notify_user","parallel","*.*"]}};
+    const DEFAULTS = {"mode":"manual","apply_to_subordinates":false,"execution":"auto","show_steps":"all","budget":{"max_extra_calls_per_step":1,"allow_tiebreak":true,"max_extra_calls_per_turn":8},"sampling":{"temperature":0.7,"seed_base":1000},"strategies":{"reread":{"enabled":true,"when":"non_thinking","max_chars":4000},"agree":{"enabled":true},"fuse":{"enabled":true,"min_chars":400},"retry":{"enabled":true,"max_per_turn":2},"deepen":{"enabled":false},"escalate":{"enabled":false,"reasoning_params":{"extra_body":{"chat_template_kwargs":{"enable_thinking":true}}}},"plan_branch":{"enabled":false,"branches":2,"max_chars":2000}},"auto":{"checkpoints":["first_step","risky_tool","final_response","after_error","invalid_step"],"risky_tools":["code_execution_tool","input","text_editor","memory_save","memory_delete","memory_forget","behaviour_adjustment","call_subordinate","scheduler","browser_agent","browser","a2a_chat","notify_user","parallel","*.*"]}};
     this.fill(config, DEFAULTS);
     return true;
   },
@@ -191,6 +191,16 @@
         </div>
         <div class="field-control">
           <label class="toggle"><input type="checkbox" x-model="config.strategies.deepen.enabled" /><span class="toggler"></span></label>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Think when unsure (experimental)</div>
+          <div class="field-description">For a model that normally answers without reasoning. A quick second pass runs first; only when the two disagree, or one is unusable, is the step asked again with reasoning switched on. Replaces agreement while enabled. The call options that switch reasoning on are <code>strategies.escalate.reasoning_params</code> in the saved settings.</div>
+        </div>
+        <div class="field-control">
+          <label class="toggle"><input type="checkbox" x-model="config.strategies.escalate.enabled" /><span class="toggler"></span></label>
         </div>
       </div>
 

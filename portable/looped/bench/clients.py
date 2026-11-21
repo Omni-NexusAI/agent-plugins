@@ -23,6 +23,7 @@ class OpenAIClient:
         self.prompt_tokens = 0
         self.completion_tokens = 0
         self.cut = 0                        # replies that hit max_tokens
+        self.last_tokens = 0                # completion tokens of the latest reply
 
     def _post(self, body: dict[str, Any]) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}
@@ -34,9 +35,16 @@ class OpenAIClient:
             return json.loads(response.read().decode("utf-8"))
 
     async def complete(self, messages: list[dict[str, str]], *, temperature: float | None = None,
-                       seed: int | None = None) -> tuple[str, str]:
+                       seed: int | None = None, thinking: bool | None = None,
+                       max_tokens: int | None = None) -> tuple[str, str]:
+        """``thinking`` and ``max_tokens`` override the client's settings for this call."""
         body: dict[str, Any] = {"model": self.model, "messages": messages,
                                 "max_tokens": self.max_tokens, **self.extra}
+        if thinking is not None:
+            body["chat_template_kwargs"] = {**(body.get("chat_template_kwargs") or {}),
+                                            "enable_thinking": thinking}
+        if max_tokens is not None:
+            body["max_tokens"] = max_tokens
         if temperature is not None:
             body["temperature"] = temperature
         if seed is not None:
@@ -47,7 +55,8 @@ class OpenAIClient:
         self.calls += 1
         usage = reply.get("usage") or {}
         self.prompt_tokens += int(usage.get("prompt_tokens") or 0)
-        self.completion_tokens += int(usage.get("completion_tokens") or 0)
+        self.last_tokens = int(usage.get("completion_tokens") or 0)
+        self.completion_tokens += self.last_tokens
         choice = (reply.get("choices") or [{}])[0]
         if choice.get("finish_reason") == "length":
             self.cut += 1
@@ -63,21 +72,25 @@ class SimulatedModel:
     probability ``malformed`` it emits no JSON at all. A re-read prompt adds
     ``reread_gain`` to the skill. Errors are independent between calls, which is
     the best case for agreement between passes: real models repeat their
-    mistakes, so real gains will be smaller.
+    mistakes, so real gains will be smaller. A call with ``thinking`` on adds
+    ``think_gain`` and a longer reply, to exercise the reasoning arms.
     """
 
     def __init__(self, gold: dict[str, Any], skill: float = 0.7, malformed: float = 0.05,
-                 reread_gain: float = 0.03, seed: int = 0):
+                 reread_gain: float = 0.03, think_gain: float = 0.15, seed: int = 0):
         self.gold, self.skill, self.malformed = gold, skill, malformed
-        self.reread_gain = reread_gain
+        self.reread_gain, self.think_gain = reread_gain, think_gain
+        self.last_tokens = 0
         self.rng = random.Random(seed)
         self.calls = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
 
     async def complete(self, messages: list[dict[str, str]], *, temperature: float | None = None,
-                       seed: int | None = None) -> tuple[str, str]:
+                       seed: int | None = None, thinking: bool | None = None,
+                       max_tokens: int | None = None) -> tuple[str, str]:
         self.calls += 1
+        self.last_tokens = 0
         question = next(m["content"] for m in messages if m["role"] == "user")
         task = self.gold[question]
         text = "\n".join(m["content"] for m in messages)
@@ -88,6 +101,8 @@ class SimulatedModel:
         skill = self.skill * (0.6 if hard else 1.0)
         if "Read the task again" in text:
             skill += self.reread_gain
+        if thinking:
+            skill += self.think_gain
         correct = self.rng.random() < skill
         if task.kind == "tool":
             name, args = task.tool_name, dict(task.tool_args)
@@ -106,5 +121,6 @@ class SimulatedModel:
             args = {"text": answer}
         reply = json.dumps({"thoughts": ["simulated"], "headline": "step",
                             "tool_name": name, "tool_args": args})
-        self.completion_tokens += len(reply) // 4
-        return reply, ""
+        self.last_tokens = len(reply) // 4 * (10 if thinking else 1)
+        self.completion_tokens += self.last_tokens
+        return reply, ("simulated reasoning" if thinking else "")

@@ -11,13 +11,15 @@ must leave the agent's normal step untouched.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import weakref
 from typing import Any
 
 from .command import ARM_KEY, MODE_KEY
-from .looped_core import Metrics, StepContext, TurnState, merge_config, parse_step, resolve_step
+from .looped_core import (Metrics, StepContext, TurnState, merge_config, parse_step,
+                          resolve_step, salvage_step)
 from .looped_core.config import MODES
 from .looped_core.controller import effective_mode, is_active
 from .looped_core.prompts import RETRY_NOTE
@@ -50,6 +52,10 @@ OUTCOMES = {
     "fuse_failed": "merge failed, kept the first draft",
     "confirmed": "second pass confirmed the draft",
     "revised": "second pass revised the draft",
+    "reasoned": "quick passes were unsure, used the reasoned pass",
+    "reasoned_same": "quick passes were unsure, reasoning confirmed the first",
+    "reasoning_unusable": "quick passes were unsure, the reasoned pass was unusable",
+    "unsure_no_budget": "quick passes were unsure, no budget left to reason",
 }
 
 
@@ -122,7 +128,12 @@ def is_thinking(agent: Any) -> bool:
 # --- model access ----------------------------------------------------------
 
 def host_parser(text: str) -> dict[str, Any] | None:
-    parsed = parse_step(text)
+    """Strict parse, then the host's own tolerant parser, then the core's salvage.
+
+    The host's parser goes before the salvage because it keeps the step's
+    other fields (thoughts, headline) when it can read them.
+    """
+    parsed = parse_step(text, salvage=False)
     if parsed is not None:
         return parsed
     try:
@@ -134,7 +145,7 @@ def host_parser(text: str) -> dict[str, Any] | None:
                 return value
     except Exception:
         pass
-    return None
+    return salvage_step(text)
 
 
 async def extra_call(agent: Any, cfg: dict[str, Any], messages: list[Any],
@@ -338,9 +349,20 @@ async def on_call_end(agent: Any, data: dict[str, Any], turn: bool) -> None:
         async def ask(text: str, variant: int) -> tuple[str, str]:
             return await extra_call(agent, cfg, snapshot, variant, extra=text)
 
+        reasoning_params = cfg["strategies"]["escalate"]["reasoning_params"]
+
+        async def think() -> tuple[str, str]:
+            # No fallback to a call without the options: that would be a third
+            # quick sample, not a reasoned one.
+            model = agent.get_chat_model()
+            answer, thought = await model.unified_call(
+                messages=list(snapshot), **copy.deepcopy(reasoning_params))
+            return answer or "", thought or ""
+
         ctx = StepContext(cfg=cfg, state=state(agent), sample=sample, ask=ask,
                           last_response=getattr(loop_data, "last_response", None) or None,
-                          parser=host_parser, early_second=early)
+                          parser=host_parser, early_second=early,
+                          think=think if reasoning_params else None)
         early = None
         decision = await resolve_step(response, reasoning,
                                       getattr(loop_data, "iteration", 0),

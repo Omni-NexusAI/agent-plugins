@@ -16,6 +16,9 @@ from .types import Candidate
 FINAL_TOOLS: tuple[str, ...] = ("response",)
 _TRAILING_COMMA = re.compile(r",(\s*[}\]])")
 _SPACES = re.compile(r"\s+")
+# The step's closing fields: "tool_name": "...", "tool_args": followed by an object.
+_CALL = re.compile(r'"(?:tool_name|tool)"\s*:\s*("(?:[^"\\]|\\.)*")\s*,\s*"tool_args"\s*:\s*(?=\{)')
+_CLOSERS = re.compile(r"[\s}\]`]*")
 
 
 def _balanced_object(text: str) -> str | None:
@@ -45,7 +48,36 @@ def _balanced_object(text: str) -> str | None:
     return None
 
 
-def parse_step(text: str) -> dict[str, Any] | None:
+def salvage_step(text: str) -> dict[str, Any] | None:
+    """Read the tool call from a step whose earlier fields are damaged.
+
+    Some models close the step correctly but break the JSON before it: an
+    unclosed ``thoughts`` list, a stray brace, a bad escape in the prose. Host
+    parsers built for dirty JSON still read such a step, so this does too, but
+    only when the tool name and a well-formed ``tool_args`` object are the last
+    thing in the reply. The damaged fields are dropped.
+    """
+    if not isinstance(text, str):
+        return None
+    found = None
+    for found in _CALL.finditer(text):
+        pass
+    if found is None:
+        return None
+    arguments = _balanced_object(text[found.end():])
+    if arguments is None or not _CLOSERS.fullmatch(text[found.end() + len(arguments):]):
+        return None
+    try:
+        name = json.loads(found.group(1), strict=False)
+        args = json.loads(_TRAILING_COMMA.sub(r"\1", arguments), strict=False)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(name, str) or not isinstance(args, dict):
+        return None
+    return {"tool_name": name, "tool_args": args}
+
+
+def parse_step(text: str, salvage: bool = True) -> dict[str, Any] | None:
     """Parse the JSON object a model emitted, tolerating common damage."""
     if not isinstance(text, str) or "{" not in text:
         return None
@@ -64,7 +96,7 @@ def parse_step(text: str) -> dict[str, Any] | None:
                 continue
             if isinstance(value, dict):
                 return value
-    return None
+    return salvage_step(text) if salvage else None
 
 
 def _normalise(value: Any) -> Any:

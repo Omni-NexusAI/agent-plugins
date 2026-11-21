@@ -14,6 +14,10 @@ by task.
 | `agree` | Agreement between passes, tie-break, merged long answers. |
 | `deepen` | Reason twice (experimental). |
 | `stack` | `reread` + `agree`. |
+| `think` | One call with reasoning switched on (`--think-max-tokens`, default 10000). The matched-cost control for a model otherwise run with `--thinking off`. |
+| `escalate` | Think when unsure (experimental): a quick second pass, then one reasoning call only when the two do not agree. |
+
+The default arms are the first five; name `think` and `escalate` with `--arms`.
 
 ## Tasks
 
@@ -57,13 +61,20 @@ reply within `--timeout` seconds (default 180) counts as an error, and after
 instead of waiting out a timeout for every remaining task. `--pause SECONDS`
 idles after each request, to go easy on a shared or fragile server.
 
-`--share-first-pass` makes `agree` and `deepen` take their first pass from the
-`plain` arm's reply for the same task instead of sampling again (list `plain`
-first). This is what the plugin does, where the host's own call is the first
-pass, and it removes sampling noise from the comparison: a task counts as fixed
-or broken only when the strategy changed the step. The shared call is still
-counted in calls per task. `reread` and `stack` send a different prompt, so
-they always sample for themselves.
+`--share-first-pass` makes `agree`, `deepen` and `escalate` take their first
+pass from the `plain` arm's reply for the same task instead of sampling again
+(list `plain` first). This is what the plugin does, where the host's own call
+is the first pass, and it removes sampling noise from the comparison: a task
+counts as fixed or broken only when the strategy changed the step. The shared
+call is still counted in calls per task. `escalate` likewise takes its
+reasoning call from the `think` arm's reply when that arm ran first. `reread`
+and `stack` send a different prompt, so they always sample for themselves.
+
+`--replies FILE` does the same and also keeps those replies (quick and
+reasoning, with their token counts) in a file, so a later run with the same
+file adds arms without asking the model again. Shared calls are not in an
+arm's own time or token totals; compare cost from the token counts in that
+file.
 
 ## Dry run
 

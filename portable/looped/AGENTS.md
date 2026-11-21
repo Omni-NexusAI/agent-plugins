@@ -32,6 +32,10 @@ strategies earn their cost.
 - Programmatic checks run before any model-based choice. A candidate that fails
   to parse, names an unknown tool, or repeats the last response cannot win
   against a valid one.
+- A step whose earlier fields are damaged still counts as a step when the tool
+  name and a well-formed `tool_args` object are the last thing in the reply
+  (`core.salvage_step`), because Agent Zero's own parser reads such a reply.
+  The adapter tries the strict parse, then the host's parser, then the salvage.
 - Extra passes are lazy: the host's own call is candidate A, and further calls
   happen only at a checkpoint and within the per-step and per-turn budget.
 - Every hook contains its own errors. A looped-mode failure leaves the host's
@@ -46,7 +50,13 @@ strategies earn their cost.
   fills gaps, keeps unknown keys and clamps bad values. `default_config.yaml`
   and the settings page's `DEFAULTS` literal must equal `core.config.DEFAULTS`
   (tests enforce both).
-- `deepen` and `plan_branch` are experimental and ship disabled.
+- `deepen`, `escalate` and `plan_branch` are experimental and ship disabled.
+  A step is resolved by one of `deepen`, `escalate`, `agree`, in that order of
+  precedence.
+- `escalate` reasons only when two quick passes do not agree. The host supplies
+  the reasoning call (`StepContext.think`); the Agent Zero adapter builds it
+  from `strategies.escalate.reasoning_params`, which a saved setting replaces
+  whole. Without a reasoning call it behaves as `agree`.
 - Per-chat mode lives in `context.data["looped_mode"]` (saved with the chat).
   The one-shot arm lives in `context.data["_looped_once"]` (never saved) and is
   cleared when agent 0's turn ends.

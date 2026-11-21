@@ -37,6 +37,9 @@ DEFAULTS: dict[str, Any] = {
         "fuse": {"enabled": True, "min_chars": 400},
         "retry": {"enabled": True, "max_per_turn": 2},
         "deepen": {"enabled": False},
+        # reasoning_params: extra call options that switch the model's reasoning on.
+        "escalate": {"enabled": False, "reasoning_params": {
+            "extra_body": {"chat_template_kwargs": {"enable_thinking": True}}}},
         "plan_branch": {"enabled": False, "branches": 2, "max_chars": 2000},
     },
     "auto": {
@@ -107,6 +110,14 @@ def merge_config(saved: Any = None) -> dict[str, Any]:
         strategies["fuse"].get("min_chars"), 400, 0, 200_000)
     strategies["retry"]["max_per_turn"] = _int(
         strategies["retry"].get("max_per_turn"), 2, 0, 16)
+    # Call options are the host's business: a saved set replaces the default whole.
+    saved_escalate = saved.get("strategies") if isinstance(saved, dict) else None
+    saved_escalate = saved_escalate.get("escalate") if isinstance(saved_escalate, dict) else None
+    saved_params = (saved_escalate.get("reasoning_params")
+                    if isinstance(saved_escalate, dict) else None)
+    strategies["escalate"]["reasoning_params"] = copy.deepcopy(
+        saved_params if isinstance(saved_params, dict)
+        else base["escalate"]["reasoning_params"])
     strategies["plan_branch"]["branches"] = _int(
         strategies["plan_branch"].get("branches"), 2, 2, 4)
     strategies["plan_branch"]["max_chars"] = _int(

@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable, Iterable
 
 from .canonical import FINAL_TOOLS, build_candidate
 from .controller import TurnState, checkpoint
-from .strategies import agree, deepen
+from .strategies import agree, deepen, escalate
 from .types import Candidate, Decision
 from .verify import check
 
@@ -17,6 +17,8 @@ from .verify import check
 Sample = Callable[[int], Awaitable[tuple[str, str]]]
 # (extra user text, variant) -> (response, reasoning): the same prompt plus a note.
 Ask = Callable[[str, int], Awaitable[tuple[str, str]]]
+# () -> (response, reasoning): the same prompt with the model's reasoning switched on.
+Think = Callable[[], Awaitable[tuple[str, str]]]
 
 
 @dataclass
@@ -29,6 +31,8 @@ class StepContext:
     last_response: str | None = None
     parser: Callable[[str], Any] | None = None
     final_tools: tuple[str, ...] = FINAL_TOOLS
+    # None when the host cannot switch reasoning on for a single call.
+    think: Think | None = None
     # A second sample the host started alongside the first call, if any.
     early_second: "asyncio.Future[tuple[str, str]] | None" = None
 
@@ -62,6 +66,11 @@ class StepContext:
                         decision: Decision) -> Candidate | None:
         return await self._extra(self.ask(text, 0), label, decision)
 
+    async def extra_think(self, label: str, decision: Decision) -> Candidate | None:
+        if self.think is None:
+            return None
+        return await self._extra(self.think(), label, decision)
+
     def drop_early(self) -> None:
         if self.early_second is not None:
             self.early_second.cancel()
@@ -80,13 +89,16 @@ async def resolve_step(
     first = ctx.candidate(raw, reasoning, "A")
     reason = checkpoint(ctx.cfg, ctx.state, first, iteration, chat_mode)
     strategies = ctx.cfg["strategies"]
-    if reason is None or not (strategies["deepen"]["enabled"] or strategies["agree"]["enabled"]):
+    if reason is None or not (strategies["deepen"]["enabled"] or strategies["agree"]["enabled"]
+                              or strategies["escalate"]["enabled"]):
         ctx.drop_early()
         return Decision(winner=first, candidates=[first])
 
     if strategies["deepen"]["enabled"]:
         ctx.drop_early()
         decision = await deepen.resolve(first, ctx, reason)
+    elif strategies["escalate"]["enabled"]:
+        decision = await escalate.resolve(first, ctx, reason)
     else:
         decision = await agree.resolve(first, ctx, reason)
     ctx.drop_early()

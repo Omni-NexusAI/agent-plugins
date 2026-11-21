@@ -18,6 +18,7 @@ network, and its benefit on your model is something to measure, not assume.
 | Merge final answers | Two long final answers that differ are merged in one extra pass. Short answers are voted on. | On |
 | Second look after errors | After a tool fails, the next step is checked twice. | On |
 | Reason twice | Draft a step, then re-answer with the draft in view. Replaces agreement while enabled. | Off (experimental) |
+| Think when unsure | For a model that normally answers without reasoning: a quick second pass runs first, and only when the two disagree (or one is unusable) is the step asked once more with reasoning switched on. Replaces agreement while enabled. `strategies.escalate.reasoning_params` holds the call options that switch reasoning on (default: llama.cpp `enable_thinking`). | Off (experimental) |
 | Parallel planning | Independent plans are written without tools and merged into one guidance note for the turn. | Off (experimental) |
 
 ## Modes

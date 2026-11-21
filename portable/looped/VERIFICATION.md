@@ -7,17 +7,19 @@ changes; do not list a path as verified without running it.
 
 ### Unit tests (host, no Agent Zero)
 
-`python -m unittest discover -s portable/looped/tests -p "test_*.py"`: 102 tests
-pass (Python 3.13, 2026-11-20).
+`python -m unittest discover -s portable/looped/tests -p "test_*.py"`: 113 tests
+pass (Python 3.13, 2026-11-21).
 
-- Core: step parsing and canonical keys, programmatic checks, settings merge,
-  modes, checkpoints, budget, agreement and tie-break, merged final answers,
-  reason-twice, re-read, retry arming, parallel planning, counters.
+- Core: step parsing (including a step whose earlier fields are damaged) and
+  canonical keys, programmatic checks, settings merge, modes, checkpoints,
+  budget, agreement and tie-break, merged final answers, reason-twice,
+  think-when-unsure, re-read, retry arming, parallel planning, counters.
 - Adapter, against a copy assembled outside the monorepo with host fakes: both
   result shapes (tuple and `LLMResult`), native function calls passed through,
   background and unmarked calls ignored, manual arm lifecycle, per-chat mode,
   subordinates, prompt list not mutated, rejected sampling overrides retried,
   model failures contained, parallel early pass started, reused and cancelled,
+  an unsure quick pass asked once more with the reasoning options added,
   `/looped` parsing and the backend command hook.
 - Packaging: `default_config.yaml` and the settings page defaults equal the
   core defaults; the assembled package is self-contained and compiles.
@@ -25,7 +27,8 @@ pass (Python 3.13, 2026-11-20).
   live-model gate's refusals (including waking a sleeping model only when no
   other model is held, reading a router's `/status` reply, and the in-use
   warning), stopping on a dead server with rows kept, the shared first pass,
-  and counting malformed replies apart from wrong answers.
+  kept replies reused by a later run, the reasoning-on arm, and counting
+  malformed replies apart from wrong answers.
 
 `python portable/looped/assemble.py --check`: current.
 
@@ -181,6 +184,21 @@ question files and the title has since been corrected.)
 | deepen | 120 | 70.0% | 61.7% to 77.5% | 3 | 4 | 1.00 | 8 | 2.00 |
 | stack | 120 | 72.5% | 64.2% to 80.8% | 11 | 9 | 0.82 | 4 | 2.15 |
 
+**Correction (same day): this table over-counts unusable replies.** The
+benchmark's parser was stricter than Agent Zero's. On this model most replies
+counted under "Malformed" are complete steps that end with the right
+`tool_name` and `tool_args` but carry damage earlier (an unclosed `thoughts`
+list, a stray brace, a LaTeX backslash). A fresh `plain` sample of the same 120
+questions had 16 such replies; Agent Zero's own parser
+(`helpers/dirty_json.py`) reads the intended tool call in all 16. The parser
+now reads them too (`core.salvage_step`), and with it that sample scores 89 of
+120 with no unusable reply, against 78 with the old parser. So in this table
+`plain` is understated, and every "fix" that replaced an unusable reply would
+not happen inside a real agent. The raw replies of this run were not kept, so
+it cannot be rescored; the next section repeats the comparison with the
+corrected parser. The first model's results stand: its misses were empty
+replies and bare letters, which Agent Zero also rejects.
+
 `plain` was right 85 times, gave a valid wrong step 24 times and an unusable
 reply 11 times, so unlike the first model this one leaves reasoning errors to
 fix. How to read the rest:
@@ -203,18 +221,70 @@ fix. How to read the rest:
 - **`stack` inherits that noise** (11 fixed, 9 broken) at more than twice the
   calls.
 
-Limits: one model, reasoning off, 120 questions, one run. The matched-compute
-control (`plain` with reasoning on and a larger token limit) was not run, so
-this does not say whether reasoning first beats a second pass.
+Limits: one model, reasoning off, 120 questions, one run, and the parser
+problem described above.
+
+### Same model, corrected parser: reasoning on, and think-when-unsure
+
+2026-11-21, same preset and the same 120 `heldout` questions, with the
+corrected parser. `plain` and `think` (one call with reasoning on,
+`--think-max-tokens 10000`, calibrated on 6 `dev` questions) were sampled once
+and kept with `--replies`; `agree` and `escalate` then ran on top of those
+replies, so all four arms share one first pass and `escalate` uses the same
+reasoning replies as `think`. No request failed.
+
+| Arm | Right of 120 | Accuracy | Fixed | Broke | p vs plain | Unusable | Calls/task | Tokens generated | vs plain |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| plain | 89 | 74.2% | - | - | - | 0 | 1.00 | 28,977 | 1.0x |
+| agree | 91 | 75.8% | 3 | 1 | 0.63 | 0 | 2.19 | 67,472 | 2.3x |
+| escalate | 95 | 79.2% | 7 | 1 | 0.07 | 0 | 2.19 | 147,396 | 5.1x |
+| think | 95 | 79.2% | 13 | 7 | 0.26 | 9 | 1.00 | 209,780 | 7.2x |
+
+Tokens are completion tokens for everything an arm needs, including the first
+pass and, for `escalate`, the reasoning calls it made.
+
+- **Reasoning on every question** fixed 13 of the 31 misses and broke 7 right
+  answers. All 9 unusable replies ran to the 10,000-token limit without
+  answering (3 of them on questions `plain` had right). Half the replies took
+  under 500 tokens; the long ones carry the cost.
+- **`escalate` reached the same accuracy with about 70% of those tokens and
+  broke one right answer instead of seven.** The second quick pass agreed with
+  the first on 97 questions, which were left alone (83 right, 14 wrong both
+  times). The other 23 were asked again with reasoning on: 7 misses became
+  right, 6 kept the same wrong answer, 4 of the reasoning replies ran out of
+  tokens (the quick answer stood), and of 6 right answers sent for reasoning
+  one became wrong. Those 5 runaway replies (4 misses and 1 right answer) are a
+  third of the arm's tokens.
+- **`agree`** on the same disagreements fixed 3 and broke 1: a third quick
+  sample is a weaker tie-break than reasoning.
+- **What `escalate` cannot reach:** the 14 misses where the model gave the same
+  wrong answer twice. Reasoning on every question fixed 6 more misses than
+  `escalate` did, and paid for them with 6 more broken answers.
+
+Limits, and why this is not yet a verified improvement:
+
+- No arm differs from `plain` at the usual 5% level on 120 questions
+  (`escalate`: p = 0.07).
+- `escalate` was designed after the earlier run on these same questions, so
+  this is not a clean held-out result.
+- One model, one run, one-step multiple-choice questions. The benchmark drives
+  the core; `escalate` has not run inside Agent Zero with a real model, where
+  the reasoning call goes through `reasoning_params`.
 
 ## Not verified
 
 - **Better reasoning on any real model.** Two models have been measured. On
   the first, strategies only replaced unusable replies. On the second, which
-  does give valid wrong answers, `agree` corrected 1 of 24 and no arm beat
-  `plain` detectably; `deepen` made valid answers worse. No strategy has been
-  shown to improve reasoning. The reasoning-on control and the comparison with
-  SenseNova-Loop-9B have not been run.
+  does give valid wrong answers, `agree` corrected few of them and `deepen`
+  made valid answers worse. The experimental `escalate` matched reasoning on
+  every question (95 of 120 against 89 for `plain`) at lower cost, but the
+  difference from `plain` is not significant on 120 questions and the
+  questions were not unseen. The comparison with SenseNova-Loop-9B has not been
+  run.
+- **`escalate` inside Agent Zero.** Unit-tested against host fakes only: not
+  run in the container project, and not with a real model whose reasoning is
+  switched by `reasoning_params`. Its settings toggle has not been opened in a
+  browser.
 
   Two live attempts were made on 2026-11-20 against the local router's
   `swift-1.5-qwen38-27b-stream-200k-vision-mtp` preset (Qwen3.8-27B Q4_K_S,

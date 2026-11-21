@@ -79,7 +79,8 @@ class DryRunTests(unittest.TestCase):
                 return SimulatedModel({task.question: task for task in items}, seed=1)
             table = asyncio.run(run_bench.run(args, make_client))
         self.assertEqual({(row["suite"], row["arm"]) for row in table},
-                         {(suite, arm) for suite in ("arith", "tool") for arm in run_bench.ARMS})
+                         {(suite, arm) for suite in ("arith", "tool") for arm in args.arms})
+        self.assertEqual(args.arms, ["plain", "reread", "agree", "deepen", "stack"])
         by_arm = {(row["suite"], row["arm"]): row for row in table}
         self.assertEqual(by_arm[("tool", "plain")]["calls_per_task"], 1.0)
         self.assertEqual(by_arm[("tool", "reread")]["calls_per_task"], 1.0)
@@ -100,15 +101,41 @@ class DryRunTests(unittest.TestCase):
                 return '{"tool_name": "response", "tool_args": {"text": "%d"}}' % self.calls, ""
 
         items = task_sets.generated("arith", 3, 7, "dev")
-        firsts, plain, agree = {}, Counting(), Counting()
-        asyncio.run(run_bench.run_arm("plain", items, plain, 1, firsts=firsts))
-        self.assertEqual(set(firsts), {task.id for task in items})
-        result = asyncio.run(run_bench.run_arm("agree", items, agree, 1, firsts=firsts))
+        shared, plain, agree = run_bench.Replies(), Counting(), Counting()
+        asyncio.run(run_bench.run_arm("plain", items, plain, 1, shared=shared))
+        self.assertEqual(set(shared.held), {("plain", task.id) for task in items})
+        result = asyncio.run(run_bench.run_arm("agree", items, agree, 1, shared=shared))
         self.assertEqual(sum(row["calls"] for row in result["rows"]) - len(items), agree.calls)
         self.assertGreaterEqual(agree.calls, len(items))        # second passes only
         separate = Counting()
-        asyncio.run(run_bench.run_arm("reread", items, separate, 1, firsts=firsts))
+        asyncio.run(run_bench.run_arm("reread", items, separate, 1, shared=shared))
         self.assertEqual(separate.calls, len(items))            # different prompt: not shared
+
+    def test_think_arm_reasons_and_replies_are_kept_for_a_later_run(self):
+        class Recording:
+            prompt_tokens = completion_tokens = 0
+            last_tokens = 7
+
+            def __init__(self):
+                self.options = []
+
+            async def complete(self, messages, **kwargs):
+                self.options.append(kwargs)
+                return '{"tool_name": "response", "tool_args": {"text": "1"}}', "because"
+
+        items = task_sets.generated("arith", 2, 7, "dev")
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "replies.jsonl"
+            first = Recording()
+            result = asyncio.run(run_bench.run_arm("think", items, first, 1,
+                                                   shared=run_bench.Replies(path), think_tokens=900))
+            self.assertEqual(first.options, [{"thinking": True, "max_tokens": 900}] * 2)
+            self.assertEqual({row["outcome"] for row in result["rows"]}, {"think"})
+            later, again = run_bench.Replies(path), Recording()
+            asyncio.run(run_bench.run_arm("think", items, again, 1, shared=later, think_tokens=900))
+            self.assertEqual(again.options, [])                 # read back, not asked again
+            self.assertEqual(later.tokens[("think", items[0].id)], 7)
+            self.assertIsNone(later.get("plain", items[0].id))  # quick replies are kept apart
 
     def test_malformed_replies_are_counted_apart_from_wrong_answers(self):
         rows = [{"correct": True, "calls": 1, "outcome": "plain", "given": "7"},

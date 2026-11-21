@@ -40,11 +40,15 @@ from clients import OpenAIClient, SimulatedModel  # noqa: E402
 
 ARMS: dict[str, dict[str, Any]] = {
     "plain": {"reread": False, "settings": None},
+    "think": {"reread": False, "settings": None, "think": True},     # one call, reasoning on
     "reread": {"reread": True, "settings": None},
     "agree": {"reread": False, "settings": {"mode": "always"}},
     "deepen": {"reread": False,
                "settings": {"mode": "always", "strategies": {"deepen": {"enabled": True}}}},
     "stack": {"reread": True, "settings": {"mode": "always"}},
+    # think when unsure: quick second pass, reasoning only when the two do not agree
+    "escalate": {"reread": False,
+                 "settings": {"mode": "always", "strategies": {"escalate": {"enabled": True}}}},
 }
 REREAD_ON = merge_config({"strategies": {"reread": {"when": "always"}}})
 
@@ -77,26 +81,63 @@ def given(candidate) -> str:
     return f"{candidate.tool_name} {json.dumps(candidate.tool_args, sort_keys=True)[:80]}"
 
 
-async def episode(task: task_sets.Task, arm: dict[str, Any], client,
-                  firsts: dict[str, tuple[str, str]] | None = None) -> dict[str, Any]:
-    """One task in one arm.
+class Replies:
+    """Replies to the unchanged prompt, by kind (``plain`` or ``think``) and task id.
 
-    ``firsts`` holds the plain arm's replies by task id. The plain arm fills
-    it; an arm that sends the same prompt takes its first pass from it instead
-    of sampling again, so any difference from plain is the strategy's doing.
+    The single-call arms fill it. An arm that sends the same prompt takes that
+    pass from here instead of sampling again, so any difference from ``plain``
+    is the strategy's doing. With a ``path`` the replies are also appended to a
+    file and read back by a later run, which then need not ask again.
     """
+
+    def __init__(self, path: Path | None = None):
+        self.path = path
+        self.held: dict[tuple[str, str], tuple[str, str]] = {}
+        self.tokens: dict[tuple[str, str], int] = {}
+        if path is not None and path.exists():
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    row = json.loads(line)
+                    key = (row["kind"], row["id"])
+                    self.held[key] = (row["raw"], row.get("reasoning", ""))
+                    self.tokens[key] = int(row.get("tokens") or 0)
+
+    def get(self, kind: str, task_id: str) -> tuple[str, str] | None:
+        return self.held.get((kind, task_id))
+
+    def put(self, kind: str, task_id: str, raw: str, reasoning: str, tokens: int = 0) -> None:
+        self.held[(kind, task_id)] = (raw, reasoning)
+        self.tokens[(kind, task_id)] = tokens
+        if self.path is not None:
+            with self.path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps({"kind": kind, "id": task_id, "raw": raw,
+                                         "reasoning": reasoning, "tokens": tokens}) + "\n")
+
+
+async def episode(task: task_sets.Task, arm: dict[str, Any], client,
+                  shared: Replies | None = None,
+                  think_tokens: int | None = None) -> dict[str, Any]:
+    """One task in one arm. ``shared`` holds reusable replies (see ``Replies``)."""
     extra = reread.build(task.question, REREAD_ON) if arm["reread"] else None
     prompt = task_sets.messages(task, extra)
-    shared = firsts is not None and not arm["reread"] and arm["settings"] is not None
-    if shared and task.id in firsts:
-        raw, reasoning = firsts[task.id]
-    else:
-        raw, reasoning = await client.complete(prompt)
-    if firsts is not None and arm["settings"] is None and not arm["reread"]:
-        firsts[task.id] = (raw, reasoning)
+    store = None if arm["reread"] else shared       # a re-read prompt is a different prompt
+
+    async def unchanged(kind: str) -> tuple[str, str]:
+        """The unchanged prompt, quick (``plain``) or with reasoning on (``think``)."""
+        held = store.get(kind, task.id) if store is not None else None
+        if held is not None:
+            return held
+        options = {"thinking": True, "max_tokens": think_tokens} if kind == "think" else {}
+        reply = await client.complete(prompt, **options)
+        if store is not None:
+            store.put(kind, task.id, reply[0], reply[1], getattr(client, "last_tokens", 0))
+        return reply
+
+    kind = "think" if arm.get("think") else "plain"
+    raw, reasoning = await unchanged(kind)
     if arm["settings"] is None:
         winner = check(build_candidate(raw, reasoning), tool_names=task_sets.TOOLS)
-        return {"id": task.id, "correct": score(task, winner), "calls": 1, "outcome": "plain",
+        return {"id": task.id, "correct": score(task, winner), "calls": 1, "outcome": kind,
                 "given": given(winner)}
     cfg = merge_config(arm["settings"])
 
@@ -107,7 +148,10 @@ async def episode(task: task_sets.Task, arm: dict[str, Any], client,
         return await client.complete(prompt + [{"role": "user", "content": text}],
                                      **variant_params(cfg, variant))
 
-    ctx = StepContext(cfg=cfg, state=TurnState(), sample=sample, ask=ask,
+    async def think():
+        return await unchanged("think")
+
+    ctx = StepContext(cfg=cfg, state=TurnState(), sample=sample, ask=ask, think=think,
                       tool_names=task_sets.TOOLS)
     decision = await resolve_step(raw, reasoning, 0, ctx)
     return {"id": task.id, "correct": score(task, decision.winner),
@@ -121,7 +165,8 @@ class ServerDown(RuntimeError):
 
 async def run_arm(name: str, items: list[task_sets.Task], client, concurrency: int,
                   on_row=None, max_errors: int = 3,
-                  firsts: dict[str, tuple[str, str]] | None = None) -> dict[str, Any]:
+                  shared: Replies | None = None,
+                  think_tokens: int | None = None) -> dict[str, Any]:
     gate_ = asyncio.Semaphore(max(1, concurrency))
     started = time.monotonic()
     done = streak = 0
@@ -132,7 +177,7 @@ async def run_arm(name: str, items: list[task_sets.Task], client, concurrency: i
             if max_errors and streak >= max_errors:
                 return None                         # the run is being abandoned
             try:
-                row = await episode(task, ARMS[name], client, firsts)
+                row = await episode(task, ARMS[name], client, shared, think_tokens)
                 streak = 0
             except Exception as error:
                 row = {"id": task.id, "correct": False, "calls": 1,
@@ -204,6 +249,8 @@ async def run(args, make_client, details: dict[str, Any] | None = None,
     that dies keeps what it measured.
     """
     table = []
+    replies = getattr(args, "replies", None)
+    shared = Replies(replies) if replies or getattr(args, "share_first_pass", False) else None
     for suite in args.suites:
         items = (task_sets.from_jsonl(Path(suite)) if suite.endswith(".jsonl")
                  else task_sets.generated(suite, args.tasks, args.seed, args.split))
@@ -211,12 +258,12 @@ async def run(args, make_client, details: dict[str, Any] | None = None,
             items = items[:args.tasks]
         results = {}
         stem = Path(suite).stem
-        firsts = {} if getattr(args, "share_first_pass", False) else None
         for name in args.arms:
             results[name] = await run_arm(
                 name, items, make_client(items), args.concurrency,
                 on_row=(lambda arm, row, stem=stem: checkpoint(stem, arm, row)) if checkpoint else None,
-                max_errors=getattr(args, "max_errors", 3), firsts=firsts)
+                max_errors=getattr(args, "max_errors", 3), shared=shared,
+                think_tokens=getattr(args, "think_max_tokens", None))
         table.extend(summarise(Path(suite).stem, results))
         if details is not None:
             details[Path(suite).stem] = {name: result["rows"] for name, result in results.items()}
@@ -249,6 +296,12 @@ def parse(argv=None):
     parser.add_argument("--share-first-pass", action="store_true",
                         help="agree and deepen take their first pass from the plain arm's reply "
                              "instead of sampling again (run plain first); calls still count it")
+    parser.add_argument("--replies", type=Path, default=None,
+                        help="file that keeps the replies to the unchanged prompt (quick and "
+                             "reasoning); a later run with the same file reuses them instead "
+                             "of asking again. Implies --share-first-pass")
+    parser.add_argument("--think-max-tokens", type=int, default=10000,
+                        help="token limit for calls that reason first (the think arm)")
     parser.add_argument("--thinking", choices=("default", "on", "off"), default="default",
                         help="ask the chat template to reason first or not (llama.cpp "
                              "chat_template_kwargs.enable_thinking); default leaves the server's setting")
@@ -276,7 +329,8 @@ def main(argv=None) -> int:
             return SimulatedModel({task.question: task for task in items}, seed=args.seed)
     else:
         key = os.environ.get(args.api_key_env, "") if args.api_key_env else ""
-        per_task = {"plain": 1, "reread": 1, "agree": 2.3, "deepen": 2, "stack": 2.3}
+        per_task = {"plain": 1, "think": 1, "reread": 1, "agree": 2.3, "deepen": 2, "stack": 2.3,
+                    "escalate": 2.4}
         estimate = int(sum(per_task[name] for name in args.arms) * args.tasks * len(args.suites))
         if not gate.confirm_live(args.endpoint, args.model, estimate, args.concurrency,
                                  api_key=key, allow_model_swap=args.allow_model_swap,

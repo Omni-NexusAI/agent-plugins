@@ -36,6 +36,13 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg["auto"]["risky_tools"], DEFAULTS["auto"]["risky_tools"])
 
     def test_merging_never_mutates_the_defaults(self):
+        thinking = {"strategies": {"escalate": {"enabled": True,
+                                                "reasoning_params": {"reasoning_effort": "high"}}}}
+        self.assertEqual(merge_config(thinking)["strategies"]["escalate"]["reasoning_params"],
+                         {"reasoning_effort": "high"})      # replaced whole, not merged
+        self.assertEqual(merge_config({"strategies": {"escalate": {"reasoning_params": 5}}})
+                         ["strategies"]["escalate"],
+                         DEFAULTS["strategies"]["escalate"])
         snapshot = copy.deepcopy(DEFAULTS)
         cfg = merge_config({"auto": {"risky_tools": ["x"]}})
         cfg["strategies"]["agree"]["enabled"] = False

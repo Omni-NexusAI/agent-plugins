@@ -167,6 +167,23 @@ class CallEndTests(AdapterCase):
         self.assertEqual(json.loads(data["result"].response)["tool_args"], {"path": "b.txt"})
         self.assertEqual(data["result"].usage, {"total": 5})
 
+    def test_unsure_quick_passes_ask_once_more_with_reasoning_switched_on(self):
+        SAVED["settings"] = {"mode": "always", "strategies": {"escalate": {"enabled": True}}}
+        a, b, c = step("write", path="a.txt"), step("write", path="b.txt"), step("write", path="c.txt")
+        agent = FakeAgent(FakeModel([b, c]))
+        data = main_call(agent, (a, ""))
+        run(runtime.on_call_end(agent, data, turn=False))
+        self.assertEqual(json.loads(data["result"][0])["tool_args"], {"path": "c.txt"})
+        quick, careful = agent.model.calls
+        self.assertIn("seed", quick["kwargs"])
+        self.assertEqual(careful["kwargs"],
+                         {"extra_body": {"chat_template_kwargs": {"enable_thinking": True}}})
+        self.assertEqual(agent.context.log.items[0]["heading"],
+                         "Looped: quick passes were unsure, used the reasoned pass")
+        agent = FakeAgent(FakeModel([a]))                    # agreement: no reasoning call
+        run(runtime.on_call_end(agent, main_call(agent, (a, "")), turn=False))
+        self.assertEqual(len(agent.model.calls), 1)
+
     def test_native_function_calls_pass_through(self):
         agent = FakeAgent(FakeModel())
         result = FakeLLMResult(response="", output_items=[types.SimpleNamespace(type="function_call")])
