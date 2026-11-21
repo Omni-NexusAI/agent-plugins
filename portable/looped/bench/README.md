@@ -104,8 +104,8 @@ to results.
 ## Comparison plan
 
 1. Loaded 27B model: all arms, `dev` then `heldout`. Answers "does the plugin
-   help the model I run". Not completed; a smaller laptop model stood in for
-   it (results in `../VERIFICATION.md`).
+   help the model I run". Not completed on the 27B; a laptop model and then
+   the desktop's 35B preset stood in for it (results in `../VERIFICATION.md`).
 2. SenseNova-Loop-9B: `plain` (and `stack`, to see whether they add up).
    Needs a llama.cpp build with SenseNova Loop support and a free model slot.
 3. A similar-size ordinary model (about 9B): all arms. This is the size-matched

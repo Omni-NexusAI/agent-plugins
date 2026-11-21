@@ -155,14 +155,66 @@ What this suggests for the plugin, not yet built or tested: for this kind of
 model the useful second look is a cheap format repair ("send that again as a
 step") and a retry when a reply is cut off, not a second opinion.
 
+### A second model with real wrong answers (MMLU-Pro): no strategy beat `plain`
+
+2026-11-21, the local router's `ornith-1.5-35b-gpukv-128k-vision` preset
+(Ornith-1.5-35B-A3B, split across an RTX 3060 and an RTX 3070, temperature
+0.2). It was chosen by the owner in place of the 27B preset; no other model was
+loaded, so nothing was displaced.
+
+Calibration on `dev` questions, `plain` only, chose one setting. With reasoning
+on, the model spent about 2,500 tokens per question and 3 of 5 replies were cut
+off at `--max-tokens 3000`. With `--thinking off` it answered in about 9 s and
+got 6 of 10 right, 3 of the misses being valid wrong steps. Reasoning off was
+used, because it gives the wrong answers a second look is supposed to catch.
+
+Main run: all 120 `heldout` questions, all five arms, `--thinking off`,
+`--share-first-pass`, `--max-tokens 3000`, `--pause 1`. No request failed.
+(The saved result's title says "dev split": `--split` does not apply to
+question files and the title has since been corrected.)
+
+| Arm | n | Accuracy | 95% CI | Fixed | Broke | p vs plain | Malformed | Calls/task |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| plain | 120 | 70.8% | 63.3% to 79.2% | - | - | - | 11 | 1.00 |
+| reread | 120 | 70.8% | 62.5% to 79.2% | 13 | 13 | 1.00 | 16 | 1.00 |
+| agree | 120 | 74.2% | 66.7% to 81.7% | 4 | 0 | 0.125 | 5 | 2.12 |
+| deepen | 120 | 70.0% | 61.7% to 77.5% | 3 | 4 | 1.00 | 8 | 2.00 |
+| stack | 120 | 72.5% | 64.2% to 80.8% | 11 | 9 | 0.82 | 4 | 2.15 |
+
+`plain` was right 85 times, gave a valid wrong step 24 times and an unusable
+reply 11 times, so unlike the first model this one leaves reasoning errors to
+fix. How to read the rest:
+
+- **No arm differs detectably from `plain`.** A run of 120 can only show a
+  difference of roughly ten points or more.
+- **`agree` never broke a right answer, and corrected 1 of 24 wrong ones.** Its
+  other three fixes replaced an unusable reply. The second pass repeated the
+  same wrong answer 13 times, was unusable 4 times and disagreed 7 times; of
+  those 7 the tie-break reached the right answer once. It also disagreed with a
+  right first answer 7 times and the right answer was kept every time.
+- **`deepen` never corrected a wrong answer and broke 4 right ones.** It
+  revised 10 steps: 3 unusable ones became right, 4 right ones became wrong, 3
+  wrong ones stayed wrong. This matches the anchoring concern that made it
+  experimental.
+- **`reread` is noise on this model:** 13 fixed, 13 broken, and more unusable
+  replies (16 against 11). It sends a different prompt, so it cannot share the
+  first pass; 18 valid answers differed from `plain`, which shows how much a
+  fresh sample moves at temperature 0.2.
+- **`stack` inherits that noise** (11 fixed, 9 broken) at more than twice the
+  calls.
+
+Limits: one model, reasoning off, 120 questions, one run. The matched-compute
+control (`plain` with reasoning on and a larger token limit) was not run, so
+this does not say whether reasoning first beats a second pass.
+
 ## Not verified
 
-- **Better reasoning on any real model.** Both runs above show unusable
-  replies being replaced, nothing more. No strategy has been shown to turn a
-  valid wrong answer into a right one on a real model: the one model measured
-  either answers correctly or fails to answer. `deepen`, `reread` and `stack`
-  were not run on MMLU-Pro. The comparison with SenseNova-Loop-9B has not been
-  run.
+- **Better reasoning on any real model.** Two models have been measured. On
+  the first, strategies only replaced unusable replies. On the second, which
+  does give valid wrong answers, `agree` corrected 1 of 24 and no arm beat
+  `plain` detectably; `deepen` made valid answers worse. No strategy has been
+  shown to improve reasoning. The reasoning-on control and the comparison with
+  SenseNova-Loop-9B have not been run.
 
   Two live attempts were made on 2026-11-20 against the local router's
   `swift-1.5-qwen38-27b-stream-200k-vision-mtp` preset (Qwen3.8-27B Q4_K_S,

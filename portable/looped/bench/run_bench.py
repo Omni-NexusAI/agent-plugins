@@ -283,8 +283,10 @@ def main(argv=None) -> int:
                                  allow_unknown_state=args.allow_unknown_state,
                                  assume_yes=args.yes):
             return 2
-        title = (f"{args.label or args.model} ({args.split} split, seed {args.seed}, "
-                 f"thinking {args.thinking})")
+        # --split picks among generated tasks only; a run of .jsonl files has none.
+        split = (f"{args.split} split, seed {args.seed}"
+                 if any(not suite.endswith(".jsonl") for suite in args.suites) else "question files")
+        title = f"{args.label or args.model} ({split}, thinking {args.thinking})"
 
         extra = ({} if args.thinking == "default" else
                  {"chat_template_kwargs": {"enable_thinking": args.thinking == "on"}})
