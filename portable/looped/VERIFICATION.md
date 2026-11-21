@@ -261,26 +261,58 @@ pass and, for `escalate`, the reasoning calls it made.
   wrong answer twice. Reasoning on every question fixed 6 more misses than
   `escalate` did, and paid for them with 6 more broken answers.
 
-Limits, and why this is not yet a verified improvement:
+`escalate` was designed after the earlier run on these same questions, so the
+table above is not a clean held-out result. The check on unseen questions:
 
-- No arm differs from `plain` at the usual 5% level on 120 questions
-  (`escalate`: p = 0.07).
-- `escalate` was designed after the earlier run on these same questions, so
-  this is not a clean held-out result.
-- One model, one run, one-step multiple-choice questions. The benchmark drives
-  the core; `escalate` has not run inside Agent Zero with a real model, where
-  the reasoning call goes through `reasoning_params`.
+**Confirmation on 90 questions not used before** (the `dev` file minus the 30
+calibration questions; same settings, `plain`, `think`, `escalate`; no request
+failed):
+
+| Arm | Right of 90 | Accuracy | Fixed | Broke | p vs plain | Unusable | Calls/task | Tokens generated | vs plain |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| plain | 62 | 68.9% | - | - | - | 0 | 1.00 | 20,860 | 1.0x |
+| escalate | 65 | 72.2% | 5 | 2 | 0.45 | 0 | 2.28 | 141,492 | 6.8x |
+| think | 64 | 71.1% | 7 | 5 | 0.77 | 5 | 1.00 | 136,468 | 6.5x |
+
+- **The direction held; the size did not reach significance.** Three more
+  right answers on 90 questions is well inside chance on its own.
+- **The token saving over `think` did not hold.** Here 25 of 90 questions went
+  to reasoning (23 of 120 before) and 5 of those ran to the token limit, so
+  `escalate` cost as much as reasoning on every question.
+- **What held on both sets:** `escalate` breaks fewer right answers than
+  reasoning on every question (3 against 12 over the 210 questions) and never
+  leaves an unusable reply (0 against 14), because a reasoning reply that runs
+  out of tokens falls back to the quick answer.
+
+Both sets together, for description only (the first set is not unseen): `plain`
+151 of 210 (71.9%), `escalate` 160 (76.2%; 12 fixed, 3 broke, p = 0.035),
+`think` 159 (75.7%; 20 fixed, 12 broke, p = 0.22); tokens 5.8x and 6.9x `plain`.
+
+Runaway reasoning is the main cost: 10 of the 48 reasoning calls `escalate`
+made hit the 10,000-token limit without answering, which is over half of its
+reasoning tokens. Estimated from the kept replies (a reply longer than the
+limit would have been cut off and the quick answer kept), a 4,000-token limit
+would give `escalate` 159 of 210 at 4.2x `plain`. That is an estimate from
+these same replies, not a measurement.
+
+Limits, and why this is a modest, not a verified, improvement:
+
+- Roughly four points of accuracy for five to seven times the tokens, on one
+  model, one run per set, one-step multiple-choice questions.
+- Significant only when the unseen and the seen set are pooled.
+- The benchmark drives the core; `escalate` has not run inside Agent Zero with
+  a real model, where the reasoning call goes through `reasoning_params`.
 
 ## Not verified
 
 - **Better reasoning on any real model.** Two models have been measured. On
   the first, strategies only replaced unusable replies. On the second, which
   does give valid wrong answers, `agree` corrected few of them and `deepen`
-  made valid answers worse. The experimental `escalate` matched reasoning on
-  every question (95 of 120 against 89 for `plain`) at lower cost, but the
-  difference from `plain` is not significant on 120 questions and the
-  questions were not unseen. The comparison with SenseNova-Loop-9B has not been
-  run.
+  made valid answers worse. The experimental `escalate` gained about four
+  points over `plain` (160 of 210 against 151) and matched reasoning on every
+  question while breaking fewer right answers, but on the 90 unseen questions
+  alone the gain is within chance, and it costs five to seven times the
+  tokens. The comparison with SenseNova-Loop-9B has not been run.
 - **`escalate` inside Agent Zero.** Unit-tested against host fakes only: not
   run in the container project, and not with a real model whose reasoning is
   switched by `reasoning_params`. Its settings toggle has not been opened in a
