@@ -1,0 +1,247 @@
+<html>
+<head><title>Looped Mode</title></head>
+<body>
+<div x-data="{
+  fill(target, defaults) {
+    for (const [key, value] of Object.entries(defaults)) {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        if (!target[key] || typeof target[key] !== 'object' || Array.isArray(target[key])) target[key] = {};
+        this.fill(target[key], value);
+      } else if (target[key] === undefined || target[key] === null) {
+        target[key] = Array.isArray(value) ? [...value] : value;
+      }
+    }
+  },
+  ready(config) {
+    const DEFAULTS = {"mode":"manual","apply_to_subordinates":false,"execution":"auto","show_steps":"all","budget":{"max_extra_calls_per_step":1,"allow_tiebreak":true,"max_extra_calls_per_turn":8},"sampling":{"temperature":0.7,"seed_base":1000},"strategies":{"reread":{"enabled":true,"when":"non_thinking","max_chars":4000},"agree":{"enabled":true},"fuse":{"enabled":true,"min_chars":400},"retry":{"enabled":true,"max_per_turn":2},"deepen":{"enabled":false},"escalate":{"enabled":false,"reasoning_params":{"extra_body":{"chat_template_kwargs":{"enable_thinking":true}}}},"plan_branch":{"enabled":false,"branches":2,"max_chars":2000}},"auto":{"checkpoints":["first_step","risky_tool","final_response","after_error","invalid_step"],"risky_tools":["code_execution_tool","input","text_editor","memory_save","memory_delete","memory_forget","behaviour_adjustment","call_subordinate","scheduler","browser_agent","browser","a2a_chat","notify_user","parallel","*.*"]}};
+    this.fill(config, DEFAULTS);
+    return true;
+  },
+  toggle(list, value, on) {
+    const index = list.indexOf(value);
+    if (on && index < 0) list.push(value);
+    if (!on && index >= 0) list.splice(index, 1);
+  }
+}">
+  <template x-if="config && ready(config)">
+    <div>
+      <div class="section-title">Looped Mode</div>
+      <div class="section-description">
+        Spends extra model calls to look twice at the agent's steps. It adds compute, not
+        knowledge: expect fewer wrong tool calls, not new facts. Use <b>/looped</b> in the
+        chat to turn it on for one message.
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Mode</div>
+          <div class="field-description">
+            <b>Manual</b>: only when armed with /looped or the composer button.<br>
+            <b>Auto</b>: at the checkpoints below.<br>
+            <b>Always</b>: every step.
+          </div>
+        </div>
+        <div class="field-control">
+          <select x-model="config.mode">
+            <option value="off">Off</option>
+            <option value="manual">Manual</option>
+            <option value="auto">Auto</option>
+            <option value="always">Always</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Checkpoints (Auto)</div>
+          <div class="field-description">Where Auto mode takes a second look.</div>
+        </div>
+        <div class="field-control">
+          <template x-for="item in [
+              ['first_step', 'First step of a turn'],
+              ['risky_tool', 'Before a tool with side effects'],
+              ['final_response', 'Before the final answer'],
+              ['after_error', 'After a tool error'],
+              ['invalid_step', 'When the step is malformed']]" :key="item[0]">
+            <label style="display:block">
+              <input type="checkbox" :checked="config.auto.checkpoints.includes(item[0])"
+                     @change="toggle(config.auto.checkpoints, item[0], $event.target.checked)" />
+              <span x-text="item[1]"></span>
+            </label>
+          </template>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Tools with side effects</div>
+          <div class="field-description">
+            One name or pattern per line. <code>*.*</code> matches MCP tools.
+          </div>
+        </div>
+        <div class="field-control">
+          <textarea rows="6" :value="config.auto.risky_tools.join('\n')"
+            @change="config.auto.risky_tools = $event.target.value.split('\n').map(s => s.trim()).filter(Boolean)"></textarea>
+        </div>
+      </div>
+
+      <div class="section-title">Budget</div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Extra calls per turn</div>
+          <div class="field-description">Hard cap on additional model calls in one turn.</div>
+        </div>
+        <div class="field-control">
+          <input type="number" min="0" max="64" step="1" x-model.number="config.budget.max_extra_calls_per_turn" />
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Tie-break pass</div>
+          <div class="field-description">When two passes disagree, allow one more call to decide (a third pass, or a merge for long final answers).</div>
+        </div>
+        <div class="field-control">
+          <label class="toggle"><input type="checkbox" x-model="config.budget.allow_tiebreak" /><span class="toggler"></span></label>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Execution</div>
+          <div class="field-description">
+            <b>Parallel</b> starts the second pass alongside the first in Always or armed turns;
+            it only saves time when the model server has two or more slots.
+            <b>Auto</b> currently runs sequentially.
+          </div>
+        </div>
+        <div class="field-control">
+          <select x-model="config.execution">
+            <option value="auto">Auto</option>
+            <option value="sequential">Sequential</option>
+            <option value="parallel">Parallel</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Second-pass temperature</div>
+          <div class="field-description">Sampling temperature for extra passes, so a greedy setting does not just repeat the first pass.</div>
+        </div>
+        <div class="field-control">
+          <input type="number" min="0" max="2" step="0.1" x-model.number="config.sampling.temperature" />
+        </div>
+      </div>
+
+      <div class="section-title">Strategies</div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Agreement before acting</div>
+          <div class="field-description">A second pass must propose the same tool call. Only one call is ever executed.</div>
+        </div>
+        <div class="field-control">
+          <label class="toggle"><input type="checkbox" x-model="config.strategies.agree.enabled" /><span class="toggler"></span></label>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Re-read the task</div>
+          <div class="field-description">Repeats the current task at the end of the prompt. Helps models that answer without thinking; skipped once the model is seen to reason first.</div>
+        </div>
+        <div class="field-control">
+          <label class="toggle"><input type="checkbox" x-model="config.strategies.reread.enabled" /><span class="toggler"></span></label>
+          <select x-model="config.strategies.reread.when">
+            <option value="non_thinking">Non-thinking models</option>
+            <option value="always">Always</option>
+            <option value="never">Never</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Merge final answers</div>
+          <div class="field-description">When two long final answers differ, merge them in one extra pass. Short answers are voted on instead.</div>
+        </div>
+        <div class="field-control">
+          <label class="toggle"><input type="checkbox" x-model="config.strategies.fuse.enabled" /><span class="toggler"></span></label>
+          <input type="number" min="0" step="50" x-model.number="config.strategies.fuse.min_chars" title="Minimum answer length to merge" />
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Second look after errors</div>
+          <div class="field-description">After a tool fails, check the next step twice.</div>
+        </div>
+        <div class="field-control">
+          <label class="toggle"><input type="checkbox" x-model="config.strategies.retry.enabled" /><span class="toggler"></span></label>
+          <input type="number" min="0" max="16" step="1" x-model.number="config.strategies.retry.max_per_turn" title="Maximum per turn" />
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Reason twice (experimental)</div>
+          <div class="field-description">Draft a step, then re-answer with the draft in view. Replaces agreement while enabled. Weakly supported on small models.</div>
+        </div>
+        <div class="field-control">
+          <label class="toggle"><input type="checkbox" x-model="config.strategies.deepen.enabled" /><span class="toggler"></span></label>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Think when unsure (experimental)</div>
+          <div class="field-description">For a model that normally answers without reasoning. A quick second pass runs first; only when the two disagree, or one is unusable, is the step asked again with reasoning switched on. Replaces agreement while enabled. The call options that switch reasoning on are <code>strategies.escalate.reasoning_params</code> in the saved settings.</div>
+        </div>
+        <div class="field-control">
+          <label class="toggle"><input type="checkbox" x-model="config.strategies.escalate.enabled" /><span class="toggler"></span></label>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Parallel planning (experimental)</div>
+          <div class="field-description">At the start of a turn, independent plans are written without tools and merged into one guidance note.</div>
+        </div>
+        <div class="field-control">
+          <label class="toggle"><input type="checkbox" x-model="config.strategies.plan_branch.enabled" /><span class="toggler"></span></label>
+          <input type="number" min="2" max="4" step="1" x-model.number="config.strategies.plan_branch.branches" title="Branches" />
+        </div>
+      </div>
+
+      <div class="section-title">Other</div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Timeline steps</div>
+          <div class="field-description">Show a Looped step in the chat timeline.</div>
+        </div>
+        <div class="field-control">
+          <select x-model="config.show_steps">
+            <option value="all">Every check</option>
+            <option value="changed">Only when the step changed</option>
+            <option value="none">Never</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Subordinate agents</div>
+          <div class="field-description">Also check the steps of subordinate agents.</div>
+        </div>
+        <div class="field-control">
+          <label class="toggle"><input type="checkbox" x-model="config.apply_to_subordinates" /><span class="toggler"></span></label>
+        </div>
+      </div>
+    </div>
+  </template>
+</div>
+</body>
+</html>
