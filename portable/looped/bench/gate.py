@@ -44,10 +44,46 @@ def model_state(endpoint: str, model: str, api_key: str = "", timeout: float = 8
         elif value == "sleeping":       # router keeps the model's process, weights dropped when idle
             sleeping_ids.append(entry.get("id"))
     statuses_known = any(isinstance(entry, dict) and "status" in entry for entry in entries)
+    busy = False
+    if not statuses_known:
+        # Routers whose model list carries no state may report it at <origin>/status.
+        origin = endpoint.rstrip("/")
+        origin = origin[:-3] if origin.endswith("/v1") else origin
+        request = urllib.request.Request(origin + "/status")
+        if api_key:
+            request.add_header("Authorization", f"Bearer {api_key}")
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                parsed = from_status(json.loads(response.read().decode("utf-8")))
+        except Exception:
+            parsed = None
+        if parsed is not None:
+            loaded_ids, busy = parsed
+            statuses_known = True
     loaded = (model in loaded_ids) if statuses_known else None
     return {"reachable": True, "listed": listed, "loaded": loaded,
             "loaded_models": loaded_ids, "sleeping_models": sleeping_ids,
-            "asleep": model in sleeping_ids, "note": ""}
+            "asleep": model in sleeping_ids, "busy": busy, "note": ""}
+
+
+def from_status(data: Any) -> tuple[list[str], bool] | None:
+    """Read a router ``/status`` reply: (loaded model ids, working right now).
+
+    Understands ``{"state", "model", "active", "queued", "models": [{"id",
+    "loaded"}]}``. Returns None when the reply has no usable model state.
+    """
+    if not isinstance(data, dict) or not isinstance(data.get("models"), list):
+        return None
+    entries = [entry for entry in data["models"] if isinstance(entry, dict) and "loaded" in entry]
+    if not entries:
+        return None
+    loaded = [str(entry.get("id")) for entry in entries if entry.get("loaded") is True]
+    current = data.get("model")
+    if isinstance(current, str) and current and data.get("state") not in (None, "unloaded") \
+            and current not in loaded:
+        loaded.append(current)          # loading or loaded, but not yet flagged in the list
+    busy = bool(data.get("active")) or bool(data.get("queued"))
+    return loaded, busy
 
 
 def confirm_live(endpoint: str, model: str, requests: int, concurrency: int, *,
@@ -92,6 +128,9 @@ def confirm_live(endpoint: str, model: str, requests: int, concurrency: int, *,
             say("Refusing: cannot tell whether this would swap models. "
                 "Pass --allow-unknown-state if you know it will not.")
             return False
+    if state.get("busy"):
+        say("  in use now:   the server is working on, or has queued, someone else's request.")
+        say("                Benchmark requests will wait behind it and slow it down.")
     say("  effect on running sessions: requests share the server's slots, so they queue")
     say("  with anything else using this model, and a single-slot server's prompt cache")
     say("  is overwritten (the other session re-reads its whole prompt on its next turn).")

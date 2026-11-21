@@ -7,7 +7,7 @@ changes; do not list a path as verified without running it.
 
 ### Unit tests (host, no Agent Zero)
 
-`python -m unittest discover -s portable/looped/tests -p "test_*.py"`: 98 tests
+`python -m unittest discover -s portable/looped/tests -p "test_*.py"`: 100 tests
 pass (Python 3.13, 2026-11-20).
 
 - Core: step parsing and canonical keys, programmatic checks, settings merge,
@@ -23,7 +23,8 @@ pass (Python 3.13, 2026-11-20).
   core defaults; the assembled package is self-contained and compiles.
 - Benchmark: task generation and splits, scoring, statistics, the dry run, the
   live-model gate's refusals (including waking a sleeping model only when no
-  other model is held), and stopping on a dead server with rows kept.
+  other model is held, reading a router's `/status` reply, and the in-use
+  warning), and stopping on a dead server with rows kept.
 
 `python portable/looped/assemble.py --check`: current.
 
@@ -59,11 +60,61 @@ published; the model server was never contacted.
 for every suite and arm with a simulated model. Those numbers are not evidence
 about any real model.
 
+### One real model: step format repaired, reasoning not tested
+
+2026-11-20, `qwen3.8-flash-next-iq3_xxs-strata-mtp-vision-160k` on the laptop
+Strata router (reached over Tailscale; one request at a time, 1 s pause after
+each, about 10 s per request). The router ignores the thinking switch: the
+model always reasons briefly before answering, so there is no thinking-off
+condition and no matched-compute control here. Settings were the defaults,
+fixed before the run; `heldout` split, seed 7.
+
+| Suite | Arm | n | Accuracy | 95% CI | Fixed | Broke | p vs plain | Calls/task |
+| --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| arith | plain | 60 | 66.7% | 55.0% to 78.3% | - | - | - | 1.00 |
+| arith | agree | 60 | 100.0% | - | 20 | 0 | < 0.001 | 2.00 |
+| arith | stack | 60 | 100.0% | - | 20 | 0 | < 0.001 | 2.00 |
+| arith | deepen | 60 | 100.0% | - | 20 | 0 | < 0.001 | 2.00 |
+| arith | reread | 60 | 75.0% | 63.3% to 86.7% | 9 | 4 | 0.27 | 1.00 |
+
+How to read it:
+
+- **Every failure was a malformed step, none was a wrong answer.** All 20
+  `plain` misses and all 15 `reread` misses were a bare number instead of the
+  JSON step, and the number was correct every time. Counting the number alone,
+  every arm scored 60 of 60.
+- **The second pass repaired every malformed step.** In `agree` the first pass
+  was malformed 16 times and the second pass was valid each time; the second
+  pass was itself malformed 3 times and the valid first pass was kept (`stack`:
+  15 and 5). `deepen` rewrote 16 drafts into valid steps. No task ended with
+  both passes malformed.
+- **This is not evidence of better reasoning.** The model made no arithmetic
+  error in any arm, so there was nothing for a second look to correct.
+- **The failure is partly caused by the question wording.** `arith` ends with
+  "Answer with the number only", which invites a bare number. `arith_chain`,
+  which ends "Put just that number in the answer text", had no malformed step
+  in 20 tasks.
+- **In a real agent the gain is smaller than the table suggests.** Agent Zero
+  already answers a malformed step with a format warning and asks again, so the
+  task is not lost without the plugin. What the second pass changes there is
+  that the bad step never reaches the history; whether that helps later steps
+  was not measured.
+- `reread` did not differ detectably from `plain` (p = 0.27), as expected for a
+  model that reasons first.
+
+Calibration on `dev`, `plain` only, used to choose the suites: `arith` 20 of 30,
+`arith_hard` 25 of 30 (all misses again bare, correct numbers, apart from one
+empty reply), `tool` 30 of 30, `tool_hard` 30 of 30, `arith_chain` 20 of 20.
+The model is at its ceiling on every generated suite, so none of them can show
+a reasoning gain for it; that needs harder questions (a real dataset subset) or
+a weaker model. The tool suites and `arith_chain` were therefore not run on
+`heldout`.
+
 ## Not verified
 
-- **Any real model.** No strategy has been measured on a real model yet, so
-  there is no evidence so far that Looped Mode improves results. The comparison
-  with SenseNova-Loop-9B has not been run.
+- **Better reasoning on any real model.** The run above shows repaired step
+  format only. No strategy has been shown to turn a wrong answer into a right
+  one on a real model. The comparison with SenseNova-Loop-9B has not been run.
 
   Two live attempts were made on 2026-11-20 against the local router's
   `swift-1.5-qwen38-27b-stream-200k-vision-mtp` preset (Qwen3.8-27B Q4_K_S,

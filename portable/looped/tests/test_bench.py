@@ -166,6 +166,25 @@ class GateTests(unittest.TestCase):
         self.assertIn("nothing is", text)
         self.assertFalse(self.gate(idle, typed="no")[0])
 
+    def test_router_status_reply_is_understood(self):
+        idle = {"state": "unloaded", "model": None, "queued": 0, "active": False,
+                "models": [{"id": "a", "loaded": False}, {"id": "b", "loaded": False}]}
+        self.assertEqual(gate.from_status(idle), ([], False))
+        working = {"state": "loaded", "model": "b", "queued": 1, "active": True,
+                   "models": [{"id": "a", "loaded": False}, {"id": "b", "loaded": True}]}
+        self.assertEqual(gate.from_status(working), (["b"], True))
+        loading = dict(working, state="loading", models=[{"id": "a", "loaded": False},
+                                                         {"id": "b", "loaded": False}])
+        self.assertEqual(gate.from_status(loading)[0], ["b"])
+        self.assertIsNone(gate.from_status({"status": "ok"}))
+        self.assertIsNone(gate.from_status({"models": [{"id": "a"}]}))
+
+    def test_a_busy_server_is_called_out(self):
+        busy = dict(self.LOADED, busy=True)
+        allowed, text = self.gate(busy, typed="model-a")
+        self.assertTrue(allowed)
+        self.assertIn("in use now", text)
+
     def test_yes_skips_only_the_typing_not_the_safety_checks(self):
         self.assertTrue(self.gate(self.LOADED, assume_yes=True)[0])
         self.assertFalse(self.gate(self.OTHER, assume_yes=True)[0])

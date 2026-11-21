@@ -106,9 +106,92 @@ def _tool(rng: random.Random, index: int) -> Task:
                 tool_name="send_message", tool_args={"to": person, "text": text}, suite="tool")
 
 
+def _arith_hard(rng: random.Random, index: int) -> Task:
+    """Four or five operations with larger intermediate values."""
+    a, b, c, d, e, f = (rng.randint(13, 97) for _ in range(6))
+    k = rng.randint(3, 9)
+    form = (index // 2) % 4
+    if form == 0:
+        question = (f"A depot has {a} pallets of {b} boxes. {c} boxes are removed. Every remaining box "
+                    f"holds {k} units, and {d} loose units are added. How many units are there?")
+        answer = (a * b - c) * k + d
+    elif form == 1:
+        question = (f"One order is {a} cases of {b} bottles, a second is {c} cases of {d} bottles, and "
+                    f"{e} cases of {f} bottles are sent back. How many bottles were kept?")
+        answer = a * b + c * d - e * f
+    elif form == 2:
+        question = (f"{a} crates of {b} parts and {c} crates of {d} parts are pooled, {e} parts are "
+                    f"scrapped, and the rest are packed into kits of {k}. How many parts are left over "
+                    f"after packing as many full kits as possible?")
+        answer = (a * b + c * d - e) % k
+    else:
+        question = (f"A farm has {a} rows of {b} trees with {k} baskets of fruit per tree. It sells "
+                    f"{c} lots of {d} baskets. How many baskets remain?")
+        answer = a * b * k - c * d
+    return Task(id=f"arith_hard-{index:04d}", kind="qa",
+                question=question + " Answer with the number only.", answer=str(answer),
+                suite="arith_hard")
+
+
+def _arith_chain(rng: random.Random, index: int) -> Task:
+    """A long running calculation: seven or eight dependent steps, one slip spoils it."""
+    a, b, c, d, e, f, g, h = (rng.randint(13, 97) for _ in range(8))
+    big, m, k = rng.randint(113, 487), rng.choice([101, 103, 107, 109, 113, 127]), rng.randint(3, 9)
+    form = (index // 2) % 2
+    if form == 0:
+        value = ((a * big + c * d - e) % m) * f - g * h + k
+        steps = (f"Start with {a}. Multiply by {big}. Add the product of {c} and {d}. Subtract {e}. "
+                 f"Replace the value by its remainder on division by {m}. Multiply by {f}. "
+                 f"Subtract the product of {g} and {h}. Add {k}.")
+    else:
+        value = (((big * b - c) * k + d * e) % m + f) * g - h     # stays positive before the remainder
+        steps = (f"Start with {big}. Multiply by {b}. Subtract {c}. Multiply by {k}. "
+                 f"Add the product of {d} and {e}. Replace the value by its remainder on division "
+                 f"by {m}. Add {f}. Multiply by {g}. Subtract {h}.")
+    return Task(id=f"arith_chain-{index:04d}", kind="qa",
+                question=steps + " What is the final value? Put just that number in the answer text.",
+                answer=str(value), suite="arith_chain")
+
+
+def _tool_hard(rng: random.Random, index: int) -> Task:
+    """One correct tool call, with a distractor file, person or action in the request."""
+    names = ["report", "notes", "todo", "summary", "draft", "log", "config", "data"]
+    people = ["Ana", "Ben", "Chen", "Dita", "Eli", "Fay"]
+    first, second = rng.sample(names, 2)
+    one = f"{first}_{rng.randint(1, 99)}.{rng.choice(['txt', 'md', 'csv'])}"
+    two = f"{second}_{rng.randint(1, 99)}.{rng.choice(['txt', 'md', 'csv'])}"
+    ident = f"tool_hard-{index:04d}"
+    form = (index // 2) % 6
+    if form == 0:
+        text = f"build {rng.randint(100, 999)}"
+        return Task(ident, "tool", f"Do not delete {one}. Save the text '{text}' in {two} instead.",
+                    tool_name="write_file", tool_args={"path": two, "text": text}, suite="tool_hard")
+    if form == 1:
+        return Task(ident, "tool", f"Once I have seen what is in {one} I will want {two} removed. "
+                                   f"Do only the first of those now.",
+                    tool_name="read_file", tool_args={"path": one}, suite="tool_hard")
+    if form == 2:
+        return Task(ident, "tool", f"I no longer need {one}, but {two} must stay. Remove the one I do not need.",
+                    tool_name="delete_file", tool_args={"path": one}, suite="tool_hard")
+    if form == 3:
+        query = f"{first} file format {rng.randint(2019, 2026)}"
+        return Task(ident, "tool", f"Without opening {one}, look up '{query}' online.",
+                    tool_name="search_web", tool_args={"query": query}, suite="tool_hard")
+    if form == 4:
+        command = f"wc -l {one}"
+        return Task(ident, "tool", f"Run `{command}`. Careful: that file, not {two}.",
+                    tool_name="run_shell", tool_args={"command": command}, suite="tool_hard")
+    writer, reader = rng.sample(people, 2)
+    text = f"the {first} is ready"
+    return Task(ident, "tool", f"{writer} wrote {one}. Tell {reader}, not {writer}, that {text}. "
+                               f"Use exactly: '{text}'.",
+                tool_name="send_message", tool_args={"to": reader, "text": text}, suite="tool_hard")
+
+
 def generated(suite: str, count: int, seed: int = 7, split: str = "heldout") -> list[Task]:
     """``count`` tasks of one split. ``dev`` and ``heldout`` never overlap."""
-    maker = {"arith": _arith, "tool": _tool}[suite]
+    maker = {"arith": _arith, "tool": _tool, "arith_hard": _arith_hard, "tool_hard": _tool_hard,
+             "arith_chain": _arith_chain}[suite]
     rng = random.Random(f"{suite}-{seed}")
     tasks = [maker(rng, index) for index in range(count * 2)]
     return tasks[0::2] if split == "dev" else tasks[1::2]

@@ -203,7 +203,8 @@ def parse(argv=None):
     mode.add_argument("--dry-run", action="store_true", help="simulated model; pipeline check only")
     mode.add_argument("--live", action="store_true", help="real model, behind the confirm gate")
     parser.add_argument("--suites", default="arith,tool",
-                        help="comma list of generated suites (arith, tool) or .jsonl paths")
+                        help="comma list of generated suites (arith, tool, arith_hard, tool_hard, arith_chain) "
+                             "or .jsonl paths")
     parser.add_argument("--arms", default="plain,reread,agree,deepen,stack")
     parser.add_argument("--tasks", type=int, default=100)
     parser.add_argument("--split", choices=("dev", "heldout"), default="dev")
