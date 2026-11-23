@@ -1,0 +1,33 @@
+# Model preset for the isolated test container: every model slot points at the
+# stub model on the private test network. No real model, no GPU. The model
+# client's placeholder key is set in docker-compose.yml.
+- name: Default
+  chat:
+    provider: other
+    name: stub-model
+    api_base: "http://looped-test-llm:8000/v1"
+    ctx_length: 32000
+    ctx_history: 0.7
+    vision: false
+    max_embeds: 0
+    rl_requests: 0
+    rl_input: 0
+    rl_output: 0
+    kwargs: {}
+  utility:
+    provider: other
+    name: stub-model
+    api_base: "http://looped-test-llm:8000/v1"
+    ctx_length: 32000
+    ctx_input: 0.7
+    rl_requests: 0
+    rl_input: 0
+    rl_output: 0
+    kwargs: {}
+  embedding:
+    provider: other
+    name: stub-embed
+    api_base: "http://looped-test-llm:8000/v1"
+    rl_requests: 0
+    rl_input: 0
+    kwargs: {}
