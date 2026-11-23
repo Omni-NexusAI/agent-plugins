@@ -87,7 +87,7 @@ class FakeModel:
         reply = self.replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
-        return reply, ""
+        return reply if isinstance(reply, tuple) else (reply, "")
 
 
 class FakeLog:
@@ -183,6 +183,32 @@ class CallEndTests(AdapterCase):
         agent = FakeAgent(FakeModel([a]))                    # agreement: no reasoning call
         run(runtime.on_call_end(agent, main_call(agent, (a, "")), turn=False))
         self.assertEqual(len(agent.model.calls), 1)
+
+    def test_carried_passes_reach_the_reasoning_call_and_cut_off_notes_a_quick_one(self):
+        SAVED["settings"] = {"mode": "always",
+                             "strategies": {"escalate": {"enabled": True, "carry": True}}}
+        a, b, c = step("write", path="a.txt"), step("write", path="b.txt"), step("write", path="c.txt")
+        agent = FakeAgent(FakeModel([b, c]))
+        data = main_call(agent, (a, ""))
+        run(runtime.on_call_end(agent, data, turn=False))
+        self.assertEqual(json.loads(data["result"][0])["tool_args"], {"path": "c.txt"})
+        careful = agent.model.calls[1]
+        self.assertEqual(careful["messages"][:2], ["sys", "user"])     # still the unchanged prompt
+        note = careful["messages"][2]
+        self.assertIsInstance(note, HumanMessage)
+        self.assertIn(a, note.content)
+        self.assertIn(b, note.content)
+        self.assertIn("extra_body", careful["kwargs"])
+
+        agent = FakeAgent(FakeModel([b, ("", "half-finished notes"), c]))
+        data = main_call(agent, (a, ""))
+        run(runtime.on_call_end(agent, data, turn=False))
+        self.assertEqual(json.loads(data["result"][0])["tool_args"], {"path": "c.txt"})
+        rescue = agent.model.calls[2]
+        self.assertIn("half-finished notes", rescue["messages"][2].content)
+        self.assertNotIn("extra_body", rescue["kwargs"])               # a quick call
+        self.assertEqual(agent.context.log.items[0]["heading"],
+                         "Looped: reasoning ran out of room, answered from its notes")
 
     def test_native_function_calls_pass_through(self):
         agent = FakeAgent(FakeModel())

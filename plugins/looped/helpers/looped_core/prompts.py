@@ -19,6 +19,23 @@ DEEPEN = (
     "correct."
 )
 
+CARRY_PASSES = (
+    "Two quick attempts at this step did not agree. Neither has been executed.\n\n"
+    "Attempt 1:\n{first}\n\nAttempt 2:\n{second}\n\n"
+    "Either may be wrong, and so may both. Work the task through yourself, use "
+    "the attempts to see where they part ways and which reasoning holds, then "
+    "output the step you will actually take, in your usual JSON format."
+)
+
+UNUSABLE_ATTEMPT = "(no usable reply)"
+
+CARRY_NOTES = (
+    "You began reasoning about this step and ran out of room before answering. "
+    "Your notes so far:\n\n{notes}\n\n"
+    "Do not start over. Using these notes, output the step you will take now, "
+    "in your usual JSON format."
+)
+
 RETRY_NOTE = (
     "The previous step failed. Before the next step, re-read the task and the "
     "error, and choose a step that addresses the cause instead of repeating it."

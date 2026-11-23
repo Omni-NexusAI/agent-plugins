@@ -57,6 +57,11 @@ strategies earn their cost.
   the reasoning call (`StepContext.think`); the Agent Zero adapter builds it
   from `strategies.escalate.reasoning_params`, which a saved setting replaces
   whole. Without a reasoning call it behaves as `agree`.
+- With `strategies.escalate.carry` (experimental, off) a later pass builds on
+  the earlier ones: the reasoning call is given the two quick attempts as a
+  note, and a reasoning reply that never reached a step hands its notes to one
+  quick call. Every pass still starts from the unchanged prompt, the note is
+  added after it, and the winner is still one whole candidate.
 - Per-chat mode lives in `context.data["looped_mode"]` (saved with the chat).
   The one-shot arm lives in `context.data["_looped_once"]` (never saved) and is
   cleared when agent 0's turn ends.

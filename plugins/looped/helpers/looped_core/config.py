@@ -37,8 +37,9 @@ DEFAULTS: dict[str, Any] = {
         "fuse": {"enabled": True, "min_chars": 400},
         "retry": {"enabled": True, "max_per_turn": 2},
         "deepen": {"enabled": False},
+        # carry: later passes are shown the earlier ones instead of starting from scratch.
         # reasoning_params: extra call options that switch the model's reasoning on.
-        "escalate": {"enabled": False, "reasoning_params": {
+        "escalate": {"enabled": False, "carry": False, "reasoning_params": {
             "extra_body": {"chat_template_kwargs": {"enable_thinking": True}}}},
         "plan_branch": {"enabled": False, "branches": 2, "max_chars": 2000},
     },
@@ -110,6 +111,7 @@ def merge_config(saved: Any = None) -> dict[str, Any]:
         strategies["fuse"].get("min_chars"), 400, 0, 200_000)
     strategies["retry"]["max_per_turn"] = _int(
         strategies["retry"].get("max_per_turn"), 2, 0, 16)
+    strategies["escalate"]["carry"] = strategies["escalate"].get("carry") is True
     # Call options are the host's business: a saved set replaces the default whole.
     saved_escalate = saved.get("strategies") if isinstance(saved, dict) else None
     saved_escalate = saved_escalate.get("escalate") if isinstance(saved_escalate, dict) else None

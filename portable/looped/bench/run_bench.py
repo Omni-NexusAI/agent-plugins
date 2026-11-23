@@ -49,6 +49,10 @@ ARMS: dict[str, dict[str, Any]] = {
     # think when unsure: quick second pass, reasoning only when the two do not agree
     "escalate": {"reread": False,
                  "settings": {"mode": "always", "strategies": {"escalate": {"enabled": True}}}},
+    # the same, with later passes shown the earlier ones instead of starting from scratch
+    "carry": {"reread": False,
+              "settings": {"mode": "always",
+                           "strategies": {"escalate": {"enabled": True, "carry": True}}}},
 }
 REREAD_ON = merge_config({"strategies": {"reread": {"when": "always"}}})
 
@@ -82,12 +86,14 @@ def given(candidate) -> str:
 
 
 class Replies:
-    """Replies to the unchanged prompt, by kind (``plain`` or ``think``) and task id.
+    """Replies to the unchanged prompt, by kind and task id.
 
-    The single-call arms fill it. An arm that sends the same prompt takes that
-    pass from here instead of sampling again, so any difference from ``plain``
-    is the strategy's doing. With a ``path`` the replies are also appended to a
-    file and read back by a later run, which then need not ask again.
+    Kinds: ``plain`` (the first quick pass), ``second`` (the second quick pass,
+    sampled with the first variant's settings) and ``think`` (reasoning on).
+    An arm that sends the same prompt takes that pass from here instead of
+    sampling again, so any difference between arms is the strategy's doing.
+    With a ``path`` the replies are also appended to a file and read back by a
+    later run, which then need not ask again.
     """
 
     def __init__(self, path: Path | None = None):
@@ -126,6 +132,11 @@ async def episode(task: task_sets.Task, arm: dict[str, Any], client,
         """The unchanged prompt, quick (``plain``) or with reasoning on (``think``)."""
         held = store.get(kind, task.id) if store is not None else None
         if held is not None:
+            used = store.tokens.get((kind, task.id), 0)
+            if kind == "think" and think_tokens and used > think_tokens:
+                # Kept under a larger limit. Under this one it would have been
+                # cut off before the answer, with about this much reasoning.
+                return "", held[1][:int(len(held[1]) * think_tokens / used)]
             return held
         options = {"thinking": True, "max_tokens": think_tokens} if kind == "think" else {}
         reply = await client.complete(prompt, **options)
@@ -134,6 +145,7 @@ async def episode(task: task_sets.Task, arm: dict[str, Any], client,
         return reply
 
     kind = "think" if arm.get("think") else "plain"
+    spent = getattr(client, "completion_tokens", 0)
     raw, reasoning = await unchanged(kind)
     if arm["settings"] is None:
         winner = check(build_candidate(raw, reasoning), tool_names=task_sets.TOOLS)
@@ -142,21 +154,32 @@ async def episode(task: task_sets.Task, arm: dict[str, Any], client,
     cfg = merge_config(arm["settings"])
 
     async def sample(variant: int):
-        return await client.complete(prompt, **variant_params(cfg, variant))
+        if variant != 1 or store is None:
+            return await client.complete(prompt, **variant_params(cfg, variant))
+        held = store.get("second", task.id)         # the second quick pass is shared too
+        if held is None:
+            held = await client.complete(prompt, **variant_params(cfg, variant))
+            store.put("second", task.id, held[0], held[1], getattr(client, "last_tokens", 0))
+        return held
 
     async def ask(text: str, variant: int):
         return await client.complete(prompt + [{"role": "user", "content": text}],
                                      **variant_params(cfg, variant))
 
-    async def think():
-        return await unchanged("think")
+    async def think(note: str | None = None):
+        if note is None:
+            return await unchanged("think")
+        return await client.complete(prompt + [{"role": "user", "content": note}],
+                                     thinking=True, max_tokens=think_tokens)
 
     ctx = StepContext(cfg=cfg, state=TurnState(), sample=sample, ask=ask, think=think,
                       tool_names=task_sets.TOOLS)
     decision = await resolve_step(raw, reasoning, 0, ctx)
     return {"id": task.id, "correct": score(task, decision.winner),
             "calls": 1 + decision.extra_calls, "outcome": decision.outcome,
-            "given": given(decision.winner)}
+            "given": given(decision.winner),
+            # completion tokens of the calls this arm made itself (shared replies excluded)
+            "tokens": getattr(client, "completion_tokens", 0) - spent}
 
 
 class ServerDown(RuntimeError):
@@ -301,7 +324,8 @@ def parse(argv=None):
                              "reasoning); a later run with the same file reuses them instead "
                              "of asking again. Implies --share-first-pass")
     parser.add_argument("--think-max-tokens", type=int, default=10000,
-                        help="token limit for calls that reason first (the think arm)")
+                        help="token limit for calls that reason first; a kept reasoning "
+                             "reply longer than this counts as cut off")
     parser.add_argument("--thinking", choices=("default", "on", "off"), default="default",
                         help="ask the chat template to reason first or not (llama.cpp "
                              "chat_template_kwargs.enable_thinking); default leaves the server's setting")
@@ -330,7 +354,7 @@ def main(argv=None) -> int:
     else:
         key = os.environ.get(args.api_key_env, "") if args.api_key_env else ""
         per_task = {"plain": 1, "think": 1, "reread": 1, "agree": 2.3, "deepen": 2, "stack": 2.3,
-                    "escalate": 2.4}
+                    "escalate": 2.4, "carry": 2.5}
         estimate = int(sum(per_task[name] for name in args.arms) * args.tasks * len(args.suites))
         if not gate.confirm_live(args.endpoint, args.model, estimate, args.concurrency,
                                  api_key=key, allow_model_swap=args.allow_model_swap,

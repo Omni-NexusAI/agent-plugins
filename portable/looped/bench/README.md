@@ -16,8 +16,10 @@ by task.
 | `stack` | `reread` + `agree`. |
 | `think` | One call with reasoning switched on (`--think-max-tokens`, default 10000). The matched-cost control for a model otherwise run with `--thinking off`. |
 | `escalate` | Think when unsure (experimental): a quick second pass, then one reasoning call only when the two do not agree. |
+| `carry` | `escalate` with earlier passes carried forward (experimental): the reasoning call is shown the two quick attempts, and a reasoning reply that runs out of tokens hands its notes to one quick call. |
 
-The default arms are the first five; name `think` and `escalate` with `--arms`.
+The default arms are the first five; name `think`, `escalate` and `carry` with
+`--arms`.
 
 ## Tasks
 
@@ -67,14 +69,19 @@ pass from the `plain` arm's reply for the same task instead of sampling again
 is the first pass, and it removes sampling noise from the comparison: a task
 counts as fixed or broken only when the strategy changed the step. The shared
 call is still counted in calls per task. `escalate` likewise takes its
-reasoning call from the `think` arm's reply when that arm ran first. `reread`
-and `stack` send a different prompt, so they always sample for themselves.
+reasoning call from the `think` arm's reply when that arm ran first, and the
+second quick pass is sampled once and shared by `agree`, `escalate` and
+`carry`. `carry`'s reasoning call carries a note, so it always asks for itself.
+`reread` and `stack` send a different prompt, so they always sample for
+themselves.
 
-`--replies FILE` does the same and also keeps those replies (quick and
-reasoning, with their token counts) in a file, so a later run with the same
-file adds arms without asking the model again. Shared calls are not in an
-arm's own time or token totals; compare cost from the token counts in that
-file.
+`--replies FILE` does the same and also keeps those replies (both quick passes
+and the reasoning one, with their token counts) in a file, so a later run with
+the same file adds arms without asking the model again. Shared calls are not in
+an arm's own time or token totals; compare cost from the token counts in that
+file plus each row's `tokens` (what the arm asked for itself). A kept reasoning
+reply longer than `--think-max-tokens` counts as cut off, so a later run can
+apply a lower limit to replies kept under a higher one.
 
 ## Dry run
 

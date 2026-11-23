@@ -19,6 +19,7 @@ network, and its benefit on your model is something to measure, not assume.
 | Second look after errors | After a tool fails, the next step is checked twice. | On |
 | Reason twice | Draft a step, then re-answer with the draft in view. Replaces agreement while enabled. | Off (experimental) |
 | Think when unsure | For a model that normally answers without reasoning: a quick second pass runs first, and only when the two disagree (or one is unusable) is the step asked once more with reasoning switched on. Replaces agreement while enabled. `strategies.escalate.reasoning_params` holds the call options that switch reasoning on (default: llama.cpp `enable_thinking`); other call options placed there are passed along too, for example `max_tokens` to bound a reasoning reply that never reaches an answer. | Off (experimental) |
+| Carry earlier passes forward | Only with "Think when unsure" (`strategies.escalate.carry`). The reasoning call is shown the two quick attempts instead of starting from scratch, and a reasoning call that runs out of room hands its notes to one quick call that answers from them. On the one model measured, on one-step questions, it did not help and cost more. | Off (experimental) |
 | Parallel planning | Independent plans are written without tools and merged into one guidance note for the turn. | Off (experimental) |
 
 ## Modes

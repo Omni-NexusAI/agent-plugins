@@ -73,13 +73,15 @@ class SimulatedModel:
     ``reread_gain`` to the skill. Errors are independent between calls, which is
     the best case for agreement between passes: real models repeat their
     mistakes, so real gains will be smaller. A call with ``thinking`` on adds
-    ``think_gain`` and a longer reply, to exercise the reasoning arms.
+    ``think_gain`` and a longer reply, to exercise the reasoning arms, and with
+    probability ``runaway`` it reasons up to the token limit without answering.
     """
 
     def __init__(self, gold: dict[str, Any], skill: float = 0.7, malformed: float = 0.05,
-                 reread_gain: float = 0.03, think_gain: float = 0.15, seed: int = 0):
+                 reread_gain: float = 0.03, think_gain: float = 0.15, runaway: float = 0.1,
+                 seed: int = 0):
         self.gold, self.skill, self.malformed = gold, skill, malformed
-        self.reread_gain, self.think_gain = reread_gain, think_gain
+        self.reread_gain, self.think_gain, self.runaway = reread_gain, think_gain, runaway
         self.last_tokens = 0
         self.rng = random.Random(seed)
         self.calls = 0
@@ -95,6 +97,10 @@ class SimulatedModel:
         task = self.gold[question]
         text = "\n".join(m["content"] for m in messages)
         self.prompt_tokens += len(text) // 4
+        if thinking and self.rng.random() < self.runaway:
+            self.last_tokens = max_tokens or 1000
+            self.completion_tokens += self.last_tokens
+            return "", "simulated reasoning that never reaches an answer"
         if self.rng.random() < self.malformed:
             return "I think the answer is clear, so I will just say it.", ""
         hard = sum(map(ord, task.id)) % 5 == 0      # stable across runs, unlike hash()

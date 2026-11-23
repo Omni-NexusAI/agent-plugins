@@ -13,7 +13,7 @@
     }
   },
   ready(config) {
-    const DEFAULTS = {"mode":"manual","apply_to_subordinates":false,"execution":"auto","show_steps":"all","budget":{"max_extra_calls_per_step":1,"allow_tiebreak":true,"max_extra_calls_per_turn":8},"sampling":{"temperature":0.7,"seed_base":1000},"strategies":{"reread":{"enabled":true,"when":"non_thinking","max_chars":4000},"agree":{"enabled":true},"fuse":{"enabled":true,"min_chars":400},"retry":{"enabled":true,"max_per_turn":2},"deepen":{"enabled":false},"escalate":{"enabled":false,"reasoning_params":{"extra_body":{"chat_template_kwargs":{"enable_thinking":true}}}},"plan_branch":{"enabled":false,"branches":2,"max_chars":2000}},"auto":{"checkpoints":["first_step","risky_tool","final_response","after_error","invalid_step"],"risky_tools":["code_execution_tool","input","text_editor","memory_save","memory_delete","memory_forget","behaviour_adjustment","call_subordinate","scheduler","browser_agent","browser","a2a_chat","notify_user","parallel","*.*"]}};
+    const DEFAULTS = {"mode":"manual","apply_to_subordinates":false,"execution":"auto","show_steps":"all","budget":{"max_extra_calls_per_step":1,"allow_tiebreak":true,"max_extra_calls_per_turn":8},"sampling":{"temperature":0.7,"seed_base":1000},"strategies":{"reread":{"enabled":true,"when":"non_thinking","max_chars":4000},"agree":{"enabled":true},"fuse":{"enabled":true,"min_chars":400},"retry":{"enabled":true,"max_per_turn":2},"deepen":{"enabled":false},"escalate":{"enabled":false,"carry":false,"reasoning_params":{"extra_body":{"chat_template_kwargs":{"enable_thinking":true}}}},"plan_branch":{"enabled":false,"branches":2,"max_chars":2000}},"auto":{"checkpoints":["first_step","risky_tool","final_response","after_error","invalid_step"],"risky_tools":["code_execution_tool","input","text_editor","memory_save","memory_delete","memory_forget","behaviour_adjustment","call_subordinate","scheduler","browser_agent","browser","a2a_chat","notify_user","parallel","*.*"]}};
     this.fill(config, DEFAULTS);
     return true;
   },
@@ -201,6 +201,16 @@
         </div>
         <div class="field-control">
           <label class="toggle"><input type="checkbox" x-model="config.strategies.escalate.enabled" /><span class="toggler"></span></label>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Carry earlier passes forward (experimental)</div>
+          <div class="field-description">Only with "Think when unsure". The reasoning call is shown the two quick attempts instead of starting from scratch, and a reasoning call that runs out of room hands its notes to one quick call that answers from them.</div>
+        </div>
+        <div class="field-control">
+          <label class="toggle"><input type="checkbox" x-model="config.strategies.escalate.carry" /><span class="toggler"></span></label>
         </div>
       </div>
 

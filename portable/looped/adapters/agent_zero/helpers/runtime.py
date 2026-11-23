@@ -55,6 +55,8 @@ OUTCOMES = {
     "reasoned": "quick passes were unsure, used the reasoned pass",
     "reasoned_same": "quick passes were unsure, reasoning confirmed the first",
     "reasoning_unusable": "quick passes were unsure, the reasoned pass was unusable",
+    "rescued": "reasoning ran out of room, answered from its notes",
+    "rescued_same": "reasoning ran out of room, its notes confirmed the first",
     "unsure_no_budget": "quick passes were unsure, no budget left to reason",
 }
 
@@ -351,12 +353,16 @@ async def on_call_end(agent: Any, data: dict[str, Any], turn: bool) -> None:
 
         reasoning_params = cfg["strategies"]["escalate"]["reasoning_params"]
 
-        async def think() -> tuple[str, str]:
+        async def think(note: str | None = None) -> tuple[str, str]:
             # No fallback to a call without the options: that would be a third
             # quick sample, not a reasoned one.
+            batch = list(snapshot)
+            if note:
+                from langchain_core.messages import HumanMessage
+                batch.append(HumanMessage(content=note))
             model = agent.get_chat_model()
             answer, thought = await model.unified_call(
-                messages=list(snapshot), **copy.deepcopy(reasoning_params))
+                messages=batch, **copy.deepcopy(reasoning_params))
             return answer or "", thought or ""
 
         ctx = StepContext(cfg=cfg, state=state(agent), sample=sample, ask=ask,

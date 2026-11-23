@@ -223,6 +223,90 @@ class EscalateTests(unittest.TestCase):
         self.assertEqual((decision.strategy, decision.outcome, decision.winner.label),
                          ("agree", "tiebreak", "B"))
 
+    def test_reasoning_starts_from_scratch_unless_passes_are_carried(self):
+        a, b, c = step("write", path="a"), step("write", path="b"), step("write", path="c")
+        model = FakeModel(samples=[b], thinks=[c])
+        self.resolve(a, model)
+        self.assertEqual(model.think_notes, [None])
+
+
+class CarryTests(unittest.TestCase):
+    SETTINGS = {"mode": "always", "budget": {"max_extra_calls_per_turn": 8},
+                "strategies": {"escalate": {"enabled": True, "carry": True}}}
+
+    def resolve(self, first, model, settings=None, **kwargs):
+        ctx = context(model, settings or self.SETTINGS, think=model.think, **kwargs)
+        return run(resolve_step(first, "", 0, ctx))
+
+    def test_the_reasoning_call_is_shown_both_quick_attempts(self):
+        a, b, c = step("write", path="a"), step("write", path="b"), step("write", path="c")
+        model = FakeModel(samples=[b], thinks=[c])
+        decision = self.resolve(a, model)
+        self.assertEqual((decision.outcome, decision.winner.label, decision.extra_calls),
+                         ("reasoned", "T", 2))
+        note = model.think_notes[0]
+        self.assertIn(a, note)
+        self.assertIn(b, note)
+        self.assertLess(note.index(a), note.index(b))
+        self.assertEqual(model.ask_calls, [])
+
+    def test_an_unusable_attempt_is_named_as_such_and_long_ones_are_shortened(self):
+        a, c = step("write", path="a"), step("write", path="c")
+        model = FakeModel(samples=[""], thinks=[c])
+        self.resolve(a, model)
+        self.assertIn("(no usable reply)", model.think_notes[0])
+        long_step = step("write", path="p" * 5000)
+        model = FakeModel(samples=[a], thinks=[c])
+        self.resolve(long_step, model)
+        self.assertLess(len(model.think_notes[0]), 3500)
+
+    def test_agreeing_quick_passes_still_do_not_reason(self):
+        a = step("write", path="a")
+        model = FakeModel(samples=[a])
+        decision = self.resolve(a, model)
+        self.assertEqual((decision.outcome, model.think_calls), ("agreed", 0))
+
+    def test_reasoning_that_ran_out_of_room_hands_its_notes_to_a_quick_call(self):
+        a, b, c = step("write", path="a"), step("write", path="b"), step("write", path="c")
+        model = FakeModel(samples=[b], thinks=[""], asks=[c])      # think() reports reasoning text
+        decision = self.resolve(a, model)
+        self.assertEqual((decision.outcome, decision.winner.label, decision.extra_calls),
+                         ("rescued", "R", 3))
+        self.assertIn("reasoned", model.ask_calls[0])              # the notes are in the quick call
+        self.assertIn("Do not start over", model.ask_calls[0])
+        model = FakeModel(samples=[b], thinks=[""], asks=[a])
+        decision = self.resolve(a, model)
+        self.assertEqual((decision.outcome, decision.winner.label), ("rescued_same", "A"))
+        self.assertFalse(decision.changed)
+
+    def test_a_failed_rescue_keeps_the_best_quick_pass(self):
+        a, b = step("write", path="a"), step("write", path="b")
+        model = FakeModel(samples=[b], thinks=[""], asks=["junk"])
+        decision = self.resolve(a, model)
+        self.assertEqual((decision.outcome, decision.winner.label), ("reasoning_unusable", "A"))
+        model = FakeModel(samples=[b], thinks=[""], asks=[RuntimeError("down")])
+        decision = self.resolve("junk", model)
+        self.assertEqual((decision.outcome, decision.winner.label), ("reasoning_unusable", "B"))
+
+    def test_no_rescue_without_budget_or_when_the_reasoning_call_failed(self):
+        a, b = step("write", path="a"), step("write", path="b")
+        settings = {"mode": "always", "budget": {"max_extra_calls_per_turn": 2},
+                    "strategies": {"escalate": {"enabled": True, "carry": True}}}
+        model = FakeModel(samples=[b], thinks=[""])
+        decision = self.resolve(a, model, settings)
+        self.assertEqual((decision.outcome, model.ask_calls), ("reasoning_unusable", []))
+        model = FakeModel(samples=[b], thinks=[RuntimeError("down")])
+        decision = self.resolve(a, model)
+        self.assertEqual((decision.outcome, model.ask_calls), ("reasoning_unusable", []))
+
+    def test_long_notes_keep_their_start_and_end(self):
+        from core.strategies.escalate import notes_note
+        text = "START" + "x" * 20000 + "END"
+        note = notes_note(text)
+        self.assertIn("START", note)
+        self.assertIn("END", note)
+        self.assertLess(len(note), 7000)
+
 
 class DeepenTests(unittest.TestCase):
     SETTINGS = {"mode": "always", "strategies": {"deepen": {"enabled": True}}}

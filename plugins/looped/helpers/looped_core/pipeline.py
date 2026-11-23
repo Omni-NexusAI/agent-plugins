@@ -17,8 +17,9 @@ from .verify import check
 Sample = Callable[[int], Awaitable[tuple[str, str]]]
 # (extra user text, variant) -> (response, reasoning): the same prompt plus a note.
 Ask = Callable[[str, int], Awaitable[tuple[str, str]]]
-# () -> (response, reasoning): the same prompt with the model's reasoning switched on.
-Think = Callable[[], Awaitable[tuple[str, str]]]
+# (note or None) -> (response, reasoning): the same prompt, plus the note when
+# given, with the model's reasoning switched on.
+Think = Callable[[str | None], Awaitable[tuple[str, str]]]
 
 
 @dataclass
@@ -66,10 +67,11 @@ class StepContext:
                         decision: Decision) -> Candidate | None:
         return await self._extra(self.ask(text, 0), label, decision)
 
-    async def extra_think(self, label: str, decision: Decision) -> Candidate | None:
+    async def extra_think(self, label: str, decision: Decision,
+                          note: str | None = None) -> Candidate | None:
         if self.think is None:
             return None
-        return await self._extra(self.think(), label, decision)
+        return await self._extra(self.think(note), label, decision)
 
     def drop_early(self) -> None:
         if self.early_second is not None:

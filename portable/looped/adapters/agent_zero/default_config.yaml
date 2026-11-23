@@ -27,6 +27,7 @@ strategies:
     enabled: false
   escalate:
     enabled: false
+    carry: false
     reasoning_params:
       extra_body:
         chat_template_kwargs:

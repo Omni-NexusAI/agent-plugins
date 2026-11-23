@@ -33,6 +33,7 @@ class FakeModel:
         self.sample_calls: list[int] = []
         self.ask_calls: list[str] = []
         self.think_calls = 0
+        self.think_notes: list[str | None] = []
 
     async def sample(self, variant: int):
         self.sample_calls.append(variant)
@@ -48,8 +49,9 @@ class FakeModel:
             raise item
         return item, ""
 
-    async def think(self):
+    async def think(self, note=None):
         self.think_calls += 1
+        self.think_notes.append(note)
         item = self.thinks.pop(0)
         if isinstance(item, Exception):
             raise item

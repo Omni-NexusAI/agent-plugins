@@ -137,6 +137,54 @@ class DryRunTests(unittest.TestCase):
             self.assertEqual(later.tokens[("think", items[0].id)], 7)
             self.assertIsNone(later.get("plain", items[0].id))  # quick replies are kept apart
 
+    def test_carry_arm_shares_quick_passes_and_reasons_with_a_note(self):
+        right = '{"tool_name": "response", "tool_args": {"text": "%s"}}'
+
+        class Scripted:
+            prompt_tokens = 0
+            last_tokens = 5
+
+            def __init__(self, replies):
+                self.replies, self.seen, self.completion_tokens = list(replies), [], 0
+
+            async def complete(self, messages, **kwargs):
+                self.seen.append((messages, kwargs))
+                self.completion_tokens += self.last_tokens
+                return self.replies.pop(0)
+
+        task = task_sets.generated("arith", 1, 7, "dev")[0]
+        shared = run_bench.Replies()
+        shared.put("plain", task.id, right % "0", "", 5)
+        escalate = Scripted([(right % "1", ""), (right % task.answer, "why")])
+        row = asyncio.run(run_bench.episode(task, run_bench.ARMS["escalate"], escalate, shared))
+        self.assertEqual((row["outcome"], row["correct"], row["tokens"]), ("reasoned", True, 10))
+        self.assertEqual(shared.get("second", task.id)[0], right % "1")     # kept for other arms
+        self.assertEqual(len(escalate.seen[1][0]), len(task_sets.messages(task)))
+
+        carry = Scripted([("", "notes so far"), (right % task.answer, "")])
+        row = asyncio.run(run_bench.episode(task, run_bench.ARMS["carry"], carry, shared,
+                                            think_tokens=900))
+        self.assertEqual((row["outcome"], row["correct"], row["calls"]), ("rescued", True, 4))
+        (reasoned, options), (rescue, quick) = carry.seen                   # second pass not re-asked
+        self.assertEqual(options, {"thinking": True, "max_tokens": 900})
+        self.assertIn(right % "0", reasoned[-1]["content"])
+        self.assertIn(right % "1", reasoned[-1]["content"])
+        self.assertIn("notes so far", rescue[-1]["content"])
+        self.assertNotIn("thinking", quick)
+
+    def test_a_kept_reasoning_reply_over_the_limit_counts_as_cut_off(self):
+        task = task_sets.generated("arith", 1, 7, "dev")[0]
+        shared = run_bench.Replies()
+        shared.put("think", task.id, '{"tool_name": "response", "tool_args": {"text": "%s"}}'
+                   % task.answer, "x" * 1000, 5000)
+        row = asyncio.run(run_bench.episode(task, run_bench.ARMS["think"], None, shared,
+                                            think_tokens=6000))
+        self.assertTrue(row["correct"])
+        row = asyncio.run(run_bench.episode(task, run_bench.ARMS["think"], None, shared,
+                                            think_tokens=2500))
+        self.assertFalse(row["correct"])
+        self.assertTrue(row["given"].startswith("(invalid)"))
+
     def test_malformed_replies_are_counted_apart_from_wrong_answers(self):
         rows = [{"correct": True, "calls": 1, "outcome": "plain", "given": "7"},
                 {"correct": False, "calls": 1, "outcome": "plain", "given": "(invalid) 7"},

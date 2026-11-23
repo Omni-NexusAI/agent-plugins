@@ -7,19 +7,21 @@ changes; do not list a path as verified without running it.
 
 ### Unit tests (host, no Agent Zero)
 
-`python -m unittest discover -s portable/looped/tests -p "test_*.py"`: 113 tests
-pass (Python 3.13, 2026-11-21).
+`python -m unittest discover -s portable/looped/tests -p "test_*.py"`: 124 tests
+pass (Python 3.13, 2026-11-22).
 
 - Core: step parsing (including a step whose earlier fields are damaged) and
   canonical keys, programmatic checks, settings merge, modes, checkpoints,
   budget, agreement and tie-break, merged final answers, reason-twice,
-  think-when-unsure, re-read, retry arming, parallel planning, counters.
+  think-when-unsure with and without earlier passes carried forward, re-read,
+  retry arming, parallel planning, counters.
 - Adapter, against a copy assembled outside the monorepo with host fakes: both
   result shapes (tuple and `LLMResult`), native function calls passed through,
   background and unmarked calls ignored, manual arm lifecycle, per-chat mode,
   subordinates, prompt list not mutated, rejected sampling overrides retried,
   model failures contained, parallel early pass started, reused and cancelled,
   an unsure quick pass asked once more with the reasoning options added,
+  carried passes reaching the reasoning call and cut-off notes a quick one,
   `/looped` parsing and the backend command hook.
 - Packaging: `default_config.yaml` and the settings page defaults equal the
   core defaults; the assembled package is self-contained and compiles.
@@ -27,8 +29,9 @@ pass (Python 3.13, 2026-11-21).
   live-model gate's refusals (including waking a sleeping model only when no
   other model is held, reading a router's `/status` reply, and the in-use
   warning), stopping on a dead server with rows kept, the shared first pass,
-  kept replies reused by a later run, the reasoning-on arm, and counting
-  malformed replies apart from wrong answers.
+  kept replies reused by a later run (a reasoning reply over the limit counted
+  as cut off), the reasoning-on arm, the `carry` arm, and counting malformed
+  replies apart from wrong answers.
 
 `python portable/looped/assemble.py --check`: current.
 
@@ -303,6 +306,51 @@ Limits, and why this is a modest, not a verified, improvement:
 - The benchmark drives the core; `escalate` has not run inside Agent Zero with
   a real model, where the reasoning call goes through `reasoning_params`.
 
+### Same model: carrying earlier passes forward did not help
+
+2026-11-22, same preset, both question sets (210 questions), `plain`, `think`,
+`escalate` and `carry` with `--think-max-tokens 4000`. `plain` and `think` came
+from the kept replies (a kept reasoning reply over 4,000 tokens counts as cut
+off). The second quick pass was sampled once in this run and shared by
+`escalate` and `carry`, so both sent the same 48 questions to reasoning and
+differ only in what `carry` adds: the two quick attempts shown to the reasoning
+call, and one quick call that answers from the notes of a reasoning reply that
+ran out of tokens. No request failed.
+
+| Arm | Right of 210 | Accuracy | Fixed | Broke | p vs plain | Unusable | Tokens generated | vs plain |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| plain | 151 | 71.9% | - | - | - | 0 | 49,837 | 1.0x |
+| think | 154 | 73.3% | 16 | 13 | 0.71 | 26 | 233,032 | 4.7x |
+| escalate | 159 | 75.7% | 11 | 3 | 0.06 | 0 | 210,774 | 4.2x |
+| carry | 154 | 73.3% | 10 | 7 | 0.63 | 0 | 249,964 | 5.0x |
+
+By set: `escalate` 65 of 90 and 94 of 120; `carry` 65 of 90 and 89 of 120.
+
+- **`carry` against `escalate` on the 48 questions sent to reasoning: 3 gained,
+  8 lost (p = 0.23), for about 19% more tokens.** Not a significant loss, and
+  no sign of a gain: level on the unseen set (2 gained, 2 lost), behind on the
+  other (1 gained, 6 lost).
+- **Showing the reasoning call the two attempts** (the 27 questions where its
+  reply finished): `carry` 11 right, `escalate` 14, `plain` 8. The note did not
+  make the reasoning side with an attempt more often (17 of 27 answers matched
+  one of the two attempts, against 24 of 32 without the note), and it did not
+  shorten the reasoning: 21 of 48 replies ran out of tokens with the note, 16
+  of 48 without.
+- **Answering from cut-off notes** (21 questions): 4 right afterwards, the same
+  as the quick answer it replaced (2 fixed, 2 broken). 16 of the 21 answers
+  were an option neither quick pass had chosen, and 15 of those were wrong.
+  These questions cost 92,477 tokens, over a third of the arm's total.
+- **The 4,000-token limit, now measured:** `escalate` 159 of 210 at 4.2x
+  `plain`, which is what the estimate above gave (with a newly sampled second
+  pass, so not the same passes as the 160 at 5.8x under the 10,000 limit).
+  Reasoning on every question does worse under the lower limit: 154 right and
+  26 unusable replies, against 159 and 14.
+
+Limits: one model, one run, one-step multiple-choice questions, where a later
+pass has little earlier work to build on. Multi-step tasks, where a looped
+model's carried state is reported to matter, are not in the benchmark, so this
+result does not cover them. `carry` stays off and experimental.
+
 ## Not verified
 
 - **Better reasoning on any real model.** Two models have been measured. On
@@ -312,11 +360,15 @@ Limits, and why this is a modest, not a verified, improvement:
   points over `plain` (160 of 210 against 151) and matched reasoning on every
   question while breaking fewer right answers, but on the 90 unseen questions
   alone the gain is within chance, and it costs five to seven times the
-  tokens. The comparison with SenseNova-Loop-9B has not been run.
-- **`escalate` inside Agent Zero.** Unit-tested against host fakes only: not
-  run in the container project, and not with a real model whose reasoning is
-  switched by `reasoning_params`. Its settings toggle has not been opened in a
-  browser.
+  tokens. Carrying earlier passes forward (`carry`) added nothing to it on
+  the same questions. The comparison with SenseNova-Loop-9B has not been run.
+- **Multi-step tasks.** Every benchmark task is one agent step. Whether any
+  strategy, `carry` included, helps over a task of several dependent steps has
+  not been measured.
+- **`escalate` and `carry` inside Agent Zero.** Unit-tested against host fakes
+  only: not run in the container project, and not with a real model whose
+  reasoning is switched by `reasoning_params`. Their settings toggles have not
+  been opened in a browser.
 
   Two live attempts were made on 2026-11-20 against the local router's
   `swift-1.5-qwen38-27b-stream-200k-vision-mtp` preset (Qwen3.8-27B Q4_K_S,
