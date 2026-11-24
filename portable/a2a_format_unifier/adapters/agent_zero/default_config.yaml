@@ -1,0 +1,3 @@
+outbound_fallback: true
+inbound_compatibility: true
+endpoints: []

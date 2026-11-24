@@ -1,0 +1,8 @@
+name: native_a2a_peer_directory
+title: Native A2A Peer Directory
+description: Explicit native Agent Zero contacts for the built-in a2a_chat tool. Metadata only; no transport or compatibility changes.
+version: 0.1.0
+always_enabled: false
+settings_sections: []
+per_project_config: true
+per_agent_config: false
