@@ -1,0 +1,9 @@
+name: remote_link
+title: Remote Link
+description: Auto-start a tunnel link provider to expose the Agent Zero WebUI externally.
+version: 1.0.0
+always_enabled: false
+settings_sections:
+  - general
+per_project_config: false
+per_agent_config: false

@@ -42,9 +42,8 @@
 - `browser_session_sync/AGENTS.md`: plugin-owned browser session restore, current-state tracking, manual recovery, and performance safeguards.
 - `_agentspine_identity/AGENTS.md`: Agentspine product identity overlay, greeting, banner, title, and version display.
 - `_enhanced_mcp_config/AGENTS.md`: MCP settings UI, disabled flag handling, status/apply/toggle API handlers, and override payload copied from the GPU-pre container.
-- `_enhanced_speech/AGENTS.md`: portable dual-voice Kokoro, runtime GPU detection,
-  atomic settings persistence, and enhanced STT recorder behavior.
-- `_multi_source_updater/AGENTS.md`: plugin-local source-aware self-update
-  selection, persistence, and compatibility UI; it must not copy host files.
+- `_enhanced_speech/AGENTS.md`: portable dual-voice Kokoro, runtime GPU detection, atomic settings persistence, and enhanced STT recorder behavior.
+- `_multi_source_updater/AGENTS.md`: plugin-local source-aware self-update selection, persistence, and compatibility UI; it must not copy host files.
 - `provider_profiles/AGENTS.md`: portable provider-aware model, API base, and context-length restore behavior mirroring the GPU-pre container's `_model_config`.
 - `ai_link_bridge/AGENTS.md`: development scaffold and AI Link task-dispatch capability boundary.
+- `remote_link/AGENTS.md`: boot-time auto-start of built-in Agent Zero Remote Control with a selectable link provider; thin client of the tunnel API server.

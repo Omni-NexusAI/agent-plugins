@@ -1,0 +1,45 @@
+<html>
+<head>
+  <title>Remote Link Settings</title>
+</head>
+<body>
+  <div x-data>
+    <!-- Auto-start toggle -->
+    <div class="browser-config-card" style="margin-bottom:16px;">
+      <div class="section-title">Auto-Start</div>
+      <div class="section-description">
+        Automatically start Agent Zero's built-in Remote Control when the container boots.
+        If a tunnel is already running, its existing URL is reused — never regenerated.
+      </div>
+      <label class="browser-config-field" style="display:flex;align-items:center;gap:10px;margin-top:8px;cursor:pointer;">
+        <input type="checkbox" x-model="config.auto_start" />
+        <span>Enable auto-start on container boot</span>
+      </label>
+    </div>
+
+    <!-- Provider selection (mirrors the built-in Remote Control list) -->
+    <div class="browser-config-card">
+      <div class="section-title">Link Provider</div>
+      <div class="section-description">
+        The provider used when auto-start launches Remote Control. Same list as the
+        built-in Remote Control panel.
+      </div>
+      <label class="browser-config-field" style="display:block;margin-top:8px;">
+        <span class="browser-config-field-label">Provider</span>
+        <select x-model="config.provider">
+          <option value="cloudflared">Cloudflare Tunnel — quickest shareable URL</option>
+          <option value="tailscale">Tailscale — stable URL on your tailnet</option>
+          <option value="microsoft">Microsoft Dev Tunnels — GitHub device login</option>
+          <option value="serveo">Serveo — SSH-based quick tunnel</option>
+        </select>
+      </label>
+    </div>
+
+    <p style="color:#888;font-size:0.85em;margin-top:12px;">
+      Start, stop, and live status are handled by the built-in
+      <strong>Settings → Remote Control</strong> panel. This plugin only configures
+      boot-time auto-start and the provider.
+    </p>
+  </div>
+</body>
+</html>
