@@ -79,7 +79,9 @@ Each row is also appended to `results/<name>.rows.jsonl` the moment its task
 finishes, so a run that dies keeps what it measured. A request that gets no
 reply within `--timeout` seconds (default 180) counts as an error, and after
 `--max-errors` errors in a row (default 3) the run stops with exit code 3
-instead of waiting out a timeout for every remaining task. `--pause SECONDS`
+instead of waiting out a timeout for every remaining task. A request the
+server answers with a 5xx status is asked once more after five seconds before
+it counts as an error, and an error row records the status. `--pause SECONDS`
 idles after each request, to go easy on a shared or fragile server.
 
 `--share-first-pass` makes `agree`, `deepen` and `escalate` take their first

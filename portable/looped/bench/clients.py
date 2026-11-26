@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+import urllib.error
 import urllib.request
 from typing import Any
 
@@ -24,6 +25,7 @@ class OpenAIClient:
         self.completion_tokens = 0
         self.cut = 0                        # replies that hit max_tokens
         self.last_tokens = 0                # completion tokens of the latest reply
+        self.retries = 0                    # requests asked again after a server error
 
     def _post(self, body: dict[str, Any]) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}
@@ -49,7 +51,14 @@ class OpenAIClient:
             body["temperature"] = temperature
         if seed is not None:
             body["seed"] = seed
-        reply = await asyncio.to_thread(self._post, body)
+        try:
+            reply = await asyncio.to_thread(self._post, body)
+        except urllib.error.HTTPError as error:
+            if error.code < 500:
+                raise
+            self.retries += 1               # a busy router may refuse for a moment: ask once more
+            await asyncio.sleep(5)
+            reply = await asyncio.to_thread(self._post, body)
         if self.pause:
             await asyncio.sleep(self.pause)
         self.calls += 1

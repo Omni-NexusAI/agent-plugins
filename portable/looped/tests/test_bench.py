@@ -217,6 +217,35 @@ class DryRunTests(unittest.TestCase):
         self.assertEqual(len(kept), 7)
         self.assertEqual(sum(row["outcome"].startswith("error") for row in kept), 3)
 
+    def test_a_server_error_is_asked_once_more_and_a_client_error_is_not(self):
+        import urllib.error
+        from unittest import mock
+
+        from clients import OpenAIClient
+
+        def failing(code, times):
+            left = [times]
+
+            def post(body):
+                if left[0]:
+                    left[0] -= 1
+                    raise urllib.error.HTTPError("http://x", code, "no", {}, None)
+                return {"choices": [{"message": {"content": "ok"}}], "usage": {"completion_tokens": 3}}
+            return post
+
+        with mock.patch("clients.asyncio.sleep", new=mock.AsyncMock()):
+            client = OpenAIClient("http://x/v1", "m")
+            client._post = failing(503, 1)
+            self.assertEqual(asyncio.run(client.complete([])), ("ok", ""))
+            self.assertEqual((client.retries, client.calls), (1, 1))
+            client._post = failing(503, 2)
+            with self.assertRaises(urllib.error.HTTPError):
+                asyncio.run(client.complete([]))
+            client._post = failing(400, 1)
+            with self.assertRaises(urllib.error.HTTPError):
+                asyncio.run(client.complete([]))
+            self.assertEqual(client.retries, 2)
+
     def test_live_needs_an_endpoint_and_model(self):
         with self.assertRaises(SystemExit):
             run_bench.parse(["--live"])

@@ -168,7 +168,7 @@ def _trail(rng: random.Random, ident: str) -> MultiTask:
     files.update({decoy: f"code: {text}" for decoy, text in zip(decoys, wrong)})
     total = 0
     for index, name in enumerate(chain):
-        value = rng.randint(11, 89)
+        value = rng.randint(113, 987)
         total += value
         onward = chain[index + 1] if index + 1 < length else last
         odd, even = (onward, decoys[index]) if total % 2 else (decoys[index], onward)
@@ -188,11 +188,11 @@ def _ledger(rng: random.Random, ident: str) -> MultiTask:
     names = _Names(rng)
     stock, changes, out = names.file("stock"), names.file("changes"), names.file("total")
     person = rng.choice(PEOPLE)
-    goods = rng.sample(GOODS, 4)
+    goods = rng.sample(GOODS, 6)
     quantity = {item: rng.randint(12, 60) for item in goods}
-    price = {item: rng.randint(3, 19) for item in goods}
+    price = {item: rng.randint(3, 29) for item in goods}
     lines, after = [], dict(quantity)
-    for item in rng.sample(goods, 3):
+    for item in rng.sample(goods, 4):
         if rng.random() < 0.5:
             amount = rng.randint(2, after[item] - 1)
             after[item] -= amount
@@ -277,10 +277,10 @@ def _recount(rng: random.Random, ident: str) -> MultiTask:
     names = _Names(rng)
     one, two = names.file("count"), names.file("count")
     recount, out = names.file("recount"), names.file("total")
-    goods = rng.sample(GOODS, 5)
+    goods = rng.sample(GOODS, 7)
     first = {item: rng.randint(14, 96) for item in goods}
     second = dict(first)
-    differ = rng.sample(goods, rng.choice([1, 2, 3]))
+    differ = rng.sample(goods, rng.choice([2, 3, 4]))
     for item in differ:
         second[item] = first[item] + rng.choice([-9, -4, -2, 3, 5, 11])
     # The recount also names one item the counts agreed on: its count is already settled.

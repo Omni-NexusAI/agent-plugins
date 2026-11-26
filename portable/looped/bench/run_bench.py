@@ -278,7 +278,7 @@ async def run_arm(name: str, items: list[task_sets.Task], client, concurrency: i
                 streak = 0
             except Exception as error:
                 row = {"id": task.id, "correct": False, "calls": 1,
-                       "outcome": f"error: {type(error).__name__}"}
+                       "outcome": f"error: {type(error).__name__} {getattr(error, 'code', '')}".strip()}
                 streak += 1
             if on_row:
                 on_row(name, row)
