@@ -1,9 +1,9 @@
 # Looped Mode benchmark
 
 Measures whether the strategies help a given model, by driving the same `core`
-code the plugin uses directly against an OpenAI-compatible endpoint. One agent
-step per task; every arm runs the same tasks and is compared with `plain` task
-by task.
+code the plugin uses directly against an OpenAI-compatible endpoint. A task is
+one agent step, or in the `multi` suite several dependent steps; every arm runs
+the same tasks and is compared with `plain` task by task.
 
 ## Arms
 
@@ -28,6 +28,17 @@ The default arms are the first five; name `think`, `escalate` and `carry` with
 - `arith_chain`: seven or eight dependent steps, including a remainder.
 - `tool`: generated requests that map to one mock tool with exact arguments.
 - `tool_hard`: the same with a distractor file, person or action in the request.
+- `multi`: tasks of five to seven dependent steps against a mock world of text
+  files and an outbox (`multistep.py`). The world runs each step the arm
+  chooses and returns its result, and every step goes through the arm's
+  strategy. Five forms: follow a trail of files chosen by a running total,
+  update a stock ledger and report its value, delete the files one list marks
+  except those another protects, assign two tickets by category and priority,
+  reconcile two counts with a recount. A task passes only when the final
+  answer, the files left behind and the messages sent are all right, so one
+  bad step spoils it. It ends at the `response` tool or after four steps more
+  than its shortest solution. An unusable reply is answered with a short
+  format reminder and counts as a step.
 - Any `.jsonl` file (format in `tasks.py`), for real datasets. None are
   bundled. `prepare_datasets.py gsm8k|mmlu_pro --raw EMPTY_FOLDER` downloads a
   fixed sample of GSM8K or MMLU-Pro (both MIT licensed, about 1 MB together)
@@ -56,6 +67,14 @@ JSON and Markdown under `results/` (not committed). The JSON also holds one row
 per task and arm (correct or not, calls, outcome, and the chosen answer
 shortened to 80 characters). Progress goes to stderr every ten tasks.
 
+Each row also has `tokens` (completion tokens of the calls the arm made
+itself) and `used` (those plus the replies it took from a shared pass: what the
+task costs on its own). A `multi` row adds the task's `form`, the number of
+`steps` taken, `resolved` (how many steps each strategy outcome decided) and,
+when it failed, what was wrong: `answer`, `no_answer`, `files`, `messages`.
+For `multi`, calls per task counts every step, and the per-turn budget is
+raised to 64 extra calls so that every step of the task is looked at.
+
 Each row is also appended to `results/<name>.rows.jsonl` the moment its task
 finishes, so a run that dies keeps what it measured. A request that gets no
 reply within `--timeout` seconds (default 180) counts as an error, and after
@@ -73,7 +92,9 @@ reasoning call from the `think` arm's reply when that arm ran first, and the
 second quick pass is sampled once and shared by `agree`, `escalate` and
 `carry`. `carry`'s reasoning call carries a note, so it always asks for itself.
 `reread` and `stack` send a different prompt, so they always sample for
-themselves.
+themselves. In a `multi` task a reply is shared per step, between arms that
+have taken the same steps up to that point; once a strategy changes a step the
+arm is on its own path and samples for itself.
 
 `--replies FILE` does the same and also keeps those replies (both quick passes
 and the reasoning one, with their token counts) in a file, so a later run with

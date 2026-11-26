@@ -1,9 +1,10 @@
 """Benchmark tasks: generated sets for a quick check, JSONL for real datasets.
 
-Every task is one agent step: a system prompt in the host's JSON step format,
-a user task, and a gold outcome. A task is ``qa`` (the answer goes in the
-``response`` tool, scored by matching the gold answer) or ``tool`` (scored by
-the canonical key of the gold tool call).
+Every task here is one agent step: a system prompt in the host's JSON step
+format, a user task, and a gold outcome. A task is ``qa`` (the answer goes in
+the ``response`` tool, scored by matching the gold answer) or ``tool`` (scored
+by the canonical key of the gold tool call). Tasks of several dependent steps
+(the ``multi`` suite) are in ``multistep.py``.
 
 Generated sets are deterministic for a seed and split into ``dev`` and
 ``heldout`` halves: tune settings on ``dev`` only and report ``heldout``.
@@ -21,6 +22,8 @@ import random
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+import multistep
 
 TOOLS = {
     "write_file": "Write text to a file. args: path, text",
@@ -191,7 +194,7 @@ def _tool_hard(rng: random.Random, index: int) -> Task:
 def generated(suite: str, count: int, seed: int = 7, split: str = "heldout") -> list[Task]:
     """``count`` tasks of one split. ``dev`` and ``heldout`` never overlap."""
     maker = {"arith": _arith, "tool": _tool, "arith_hard": _arith_hard, "tool_hard": _tool_hard,
-             "arith_chain": _arith_chain}[suite]
+             "arith_chain": _arith_chain, "multi": multistep.make}[suite]
     rng = random.Random(f"{suite}-{seed}")
     tasks = [maker(rng, index) for index in range(count * 2)]
     return tasks[0::2] if split == "dev" else tasks[1::2]
@@ -218,8 +221,8 @@ def from_jsonl(path: Path, suite: str | None = None) -> list[Task]:
     return tasks
 
 
-def messages(task: Task, extra: str | None = None) -> list[dict[str, str]]:
-    prompt = [{"role": "system", "content": SYSTEM},
+def messages(task, extra: str | None = None) -> list[dict[str, str]]:
+    prompt = [{"role": "system", "content": getattr(task, "system", SYSTEM)},
               {"role": "user", "content": task.question}]
     if extra:
         prompt.append({"role": "user", "content": extra})

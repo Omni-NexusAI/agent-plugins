@@ -7,8 +7,8 @@ changes; do not list a path as verified without running it.
 
 ### Unit tests (host, no Agent Zero)
 
-`python -m unittest discover -s portable/looped/tests -p "test_*.py"`: 124 tests
-pass (Python 3.13, 2026-11-22).
+`python -m unittest discover -s portable/looped/tests -p "test_*.py"`: 130 tests
+pass (Python 3.13, 2026-11-26).
 
 - Core: step parsing (including a step whose earlier fields are damaged) and
   canonical keys, programmatic checks, settings merge, modes, checkpoints,
@@ -30,8 +30,11 @@ pass (Python 3.13, 2026-11-22).
   other model is held, reading a router's `/status` reply, and the in-use
   warning), stopping on a dead server with rows kept, the shared first pass,
   kept replies reused by a later run (a reasoning reply over the limit counted
-  as cut off), the reasoning-on arm, the `carry` arm, and counting malformed
-  replies apart from wrong answers.
+  as cut off), the reasoning-on arm, the `carry` arm, counting malformed
+  replies apart from wrong answers, and the multi-step tasks: every generated
+  task passes with its own solution and fails on one wrong step, an episode
+  runs until the answer or the step limit, and arms share a step only while
+  they have taken the same steps.
 
 `python portable/looped/assemble.py --check`: current.
 
@@ -362,9 +365,13 @@ result does not cover them. `carry` stays off and experimental.
   alone the gain is within chance, and it costs five to seven times the
   tokens. Carrying earlier passes forward (`carry`) added nothing to it on
   the same questions. The comparison with SenseNova-Loop-9B has not been run.
-- **Multi-step tasks.** Every benchmark task is one agent step. Whether any
-  strategy, `carry` included, helps over a task of several dependent steps has
-  not been measured.
+- **Multi-step tasks.** The benchmark has a `multi` suite of five to seven
+  dependent steps (2026-11-26), checked with unit tests and the simulated
+  model only. It has not been run on a real model: the live-model gate refused
+  the first attempt because the router held a different model than the one
+  asked for, and nothing was swapped. Whether any strategy, `carry` included,
+  helps over a task of several dependent steps is still unmeasured, and the
+  tasks' difficulty has not been calibrated.
 - **`escalate` and `carry` inside Agent Zero.** Unit-tested against host fakes
   only: not run in the container project, and not with a real model whose
   reasoning is switched by `reasoning_params`. Their settings toggles have not

@@ -10,6 +10,7 @@ BENCH = Path(__file__).resolve().parents[1] / "bench"
 sys.path.insert(0, str(BENCH))
 
 import gate  # noqa: E402
+import multistep  # noqa: E402
 import run_bench  # noqa: E402
 import stats  # noqa: E402
 import tasks as task_sets  # noqa: E402
@@ -219,6 +220,108 @@ class DryRunTests(unittest.TestCase):
     def test_live_needs_an_endpoint_and_model(self):
         with self.assertRaises(SystemExit):
             run_bench.parse(["--live"])
+
+
+class Scripted:
+    """Plays a multi-step task's own solution, one step per prompt."""
+
+    prompt_tokens = completion_tokens = 0
+
+    def __init__(self, task, first=()):
+        self.task, self.first, self.calls = task, list(first), 0
+
+    async def complete(self, messages, **kwargs):
+        self.calls += 1
+        if self.first:
+            return self.first.pop(0), ""
+        taken = sum(1 for m in messages if m["role"] == "assistant" and m["content"].startswith("{"))
+        tool, args = self.task.script[min(taken, len(self.task.script) - 1)]
+        return step(tool, **args), ""
+
+
+class MultiStepTests(unittest.TestCase):
+    def test_every_task_passes_with_its_own_solution_and_both_splits_have_every_form(self):
+        dev = task_sets.generated("multi", 20, seed=3, split="dev")
+        held = task_sets.generated("multi", 20, seed=3, split="heldout")
+        self.assertEqual([t.question for t in dev],
+                         [t.question for t in task_sets.generated("multi", 20, 3, "dev")])
+        self.assertFalse({t.id for t in dev} & {t.id for t in held})
+        for tasks in (dev, held):
+            self.assertEqual({t.form for t in tasks}, set(multistep.FORMS))
+        for task in dev + held:
+            world = task.world()
+            for tool, args in task.script[:-1]:
+                self.assertFalse(world.run(tool, args).startswith("Error"), task.id)
+            self.assertEqual(task.failures(world), [], task.id)
+            self.assertEqual(task.script[-1], ("response", {"text": task.answer}))
+            self.assertTrue(run_bench.score(task, build_candidate(final(task.answer))))
+            self.assertGreaterEqual(len(task.script), 5)
+
+    def test_the_world_reports_errors_and_one_wrong_step_fails_the_task(self):
+        task = next(t for t in task_sets.generated("multi", 10, 3, "dev") if t.form == "cleanup")
+        world = task.world()
+        self.assertEqual(world.run("read_file", {"path": "missing.txt"}),
+                         "Error: no such file: missing.txt")
+        self.assertIn("unknown tool", world.run("run_shell", {"command": "ls"}))
+        self.assertIn("needs a path", world.run("delete_file", {}))
+        for tool, args in task.script[:-1]:
+            world.run(tool, args)
+        kept = task.files[task.script[1][1]["path"]].splitlines()[0]
+        world.run("delete_file", {"path": "./" + kept})
+        self.assertEqual(task.failures(world), ["files"])
+        ledger = next(t for t in task_sets.generated("multi", 10, 3, "dev") if t.form == "ledger")
+        world = ledger.world()
+        world.run("write_file", {"path": ledger.script[2][1]["path"], "text": f" {ledger.answer}.0 "})
+        self.assertEqual(ledger.failures(world), ["messages"])     # 1234.0 is 1234; nothing sent
+
+    def test_an_episode_runs_steps_until_the_answer(self):
+        task = task_sets.generated("multi", 4, 3, "dev")[1]
+        plain = run_bench.ARMS["plain"]
+        row = asyncio.run(run_bench.episode(task, plain, Scripted(task)))
+        self.assertEqual((row["correct"], row["outcome"], row["steps"], row["calls"]),
+                         (True, "passed", len(task.script), len(task.script)))
+        self.assertEqual(row["resolved"], {"plain": len(task.script)})
+        slip = asyncio.run(run_bench.episode(task, plain, Scripted(task, ["not a step"])))
+        self.assertEqual((slip["correct"], slip["steps"]), (True, len(task.script) + 1))
+        again = step("read_file", path=task.script[0][1]["path"])
+        stuck = asyncio.run(run_bench.episode(task, plain, Scripted(task, [again] * 50)))
+        self.assertEqual((stuck["correct"], stuck["steps"], stuck["given"]),
+                         (False, task.max_steps, "(no answer)"))
+        self.assertTrue(stuck["outcome"].startswith("failed: no_answer"))
+        wrong = asyncio.run(run_bench.episode(task, plain, Scripted(task, [final("nonsense")])))
+        self.assertFalse(wrong["correct"])
+        self.assertTrue(wrong["outcome"].startswith("failed: answer"))
+
+    def test_arms_share_a_step_while_they_have_taken_the_same_steps(self):
+        task = task_sets.generated("multi", 4, 3, "dev")[0]
+        shared, first, second = run_bench.Replies(), Scripted(task), Scripted(task)
+        asyncio.run(run_bench.run_arm("plain", [task], first, 1, shared=shared))
+        result = asyncio.run(run_bench.run_arm("escalate", [task], second, 1, shared=shared))
+        row = result["rows"][0]
+        steps = len(task.script)
+        self.assertEqual(second.calls, steps)                   # the second quick passes only
+        self.assertEqual((row["correct"], row["calls"]), (True, 2 * steps))
+        self.assertEqual(row["resolved"], {"agreed": steps})
+        self.assertEqual(len({key for kind, key in shared.held if kind == "plain"}), steps)
+
+    def test_every_step_of_a_long_task_is_looked_at(self):
+        task = max(task_sets.generated("multi", 10, 3, "dev"), key=lambda t: len(t.script))
+        row = asyncio.run(run_bench.episode(task, run_bench.ARMS["agree"], Scripted(task)))
+        self.assertEqual(row["resolved"], {"agreed": len(task.script)})
+
+    def test_dry_run_handles_the_multi_suite(self):
+        with tempfile.TemporaryDirectory() as folder:
+            args = run_bench.parse(["--dry-run", "--suites", "multi", "--tasks", "10",
+                                    "--arms", "plain,think,escalate,carry", "--out", folder])
+
+            def make_client(items):
+                from clients import SimulatedModel
+                return SimulatedModel({task.question: task for task in items}, seed=1)
+            details = {}
+            table = asyncio.run(run_bench.run(args, make_client, details))
+        self.assertEqual([row["arm"] for row in table], args.arms)
+        self.assertGreater(table[0]["calls_per_task"], 4)
+        self.assertTrue(all("steps" in row for row in details["multi"]["carry"]))
 
 
 class GateTests(unittest.TestCase):

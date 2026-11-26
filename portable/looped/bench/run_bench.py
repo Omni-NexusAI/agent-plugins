@@ -9,13 +9,16 @@
         Real model, behind the warn-and-confirm gate in gate.py.
 
 Arms: plain, reread, agree, deepen, stack (reread + agree). Every arm runs the
-same tasks, so each is compared with ``plain`` task by task.
+same tasks, so each is compared with ``plain`` task by task. A task is one
+agent step, or in the ``multi`` suite several dependent steps against a mock
+world (``multistep.py``), where every step goes through the arm's strategy.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import sys
@@ -34,6 +37,7 @@ from core.strategies import reread  # noqa: E402
 from core.verify import check  # noqa: E402
 
 import gate  # noqa: E402
+import multistep  # noqa: E402
 import stats  # noqa: E402
 import tasks as task_sets  # noqa: E402
 from clients import OpenAIClient, SimulatedModel  # noqa: E402
@@ -55,6 +59,9 @@ ARMS: dict[str, dict[str, Any]] = {
                            "strategies": {"escalate": {"enabled": True, "carry": True}}}},
 }
 REREAD_ON = merge_config({"strategies": {"reread": {"when": "always"}}})
+# A multi-step task is one turn: lift the per-turn budget so every step is looked at.
+MULTI_BUDGET = {"budget": {"max_extra_calls_per_turn": 64}}
+STEPS_PER_MULTI_TASK = 7                            # for the request estimate only
 
 
 def score(task: task_sets.Task, candidate) -> bool:
@@ -86,7 +93,11 @@ def given(candidate) -> str:
 
 
 class Replies:
-    """Replies to the unchanged prompt, by kind and task id.
+    """Replies to the unchanged prompt, by kind and prompt key.
+
+    The key is the task id, or for a step of a multi-step task the task id
+    plus a digest of the prompt so far, so a reply is reused only by an arm
+    that has taken the same steps up to that point.
 
     Kinds: ``plain`` (the first quick pass), ``second`` (the second quick pass,
     sampled with the first variant's settings) and ``think`` (reasoning on).
@@ -120,46 +131,58 @@ class Replies:
                                          "reasoning": reasoning, "tokens": tokens}) + "\n")
 
 
-async def episode(task: task_sets.Task, arm: dict[str, Any], client,
-                  shared: Replies | None = None,
-                  think_tokens: int | None = None) -> dict[str, Any]:
-    """One task in one arm. ``shared`` holds reusable replies (see ``Replies``)."""
-    extra = reread.build(task.question, REREAD_ON) if arm["reread"] else None
-    prompt = task_sets.messages(task, extra)
+async def resolve(prompt: list[dict[str, str]], key: str, arm: dict[str, Any], client,
+                  shared: Replies | None, think_tokens: int | None, tools,
+                  state: TurnState | None = None, iteration: int = 0):
+    """One step in one arm: the chosen candidate, and what choosing it cost.
+
+    ``key`` names the prompt in ``shared`` (see ``Replies``). ``tokens`` counts
+    the completion tokens of the calls this arm made itself; ``used`` adds the
+    replies it took from ``shared``, so it is what the step costs on its own.
+    """
     store = None if arm["reread"] else shared       # a re-read prompt is a different prompt
+    spent = getattr(client, "completion_tokens", 0)
+    reused = 0
 
     async def unchanged(kind: str) -> tuple[str, str]:
         """The unchanged prompt, quick (``plain``) or with reasoning on (``think``)."""
-        held = store.get(kind, task.id) if store is not None else None
+        nonlocal reused
+        held = store.get(kind, key) if store is not None else None
         if held is not None:
-            used = store.tokens.get((kind, task.id), 0)
+            used = store.tokens.get((kind, key), 0)
             if kind == "think" and think_tokens and used > think_tokens:
                 # Kept under a larger limit. Under this one it would have been
                 # cut off before the answer, with about this much reasoning.
+                reused += think_tokens
                 return "", held[1][:int(len(held[1]) * think_tokens / used)]
+            reused += used
             return held
         options = {"thinking": True, "max_tokens": think_tokens} if kind == "think" else {}
         reply = await client.complete(prompt, **options)
         if store is not None:
-            store.put(kind, task.id, reply[0], reply[1], getattr(client, "last_tokens", 0))
+            store.put(kind, key, reply[0], reply[1], getattr(client, "last_tokens", 0))
         return reply
 
+    def cost(calls: int, outcome: str) -> dict[str, Any]:
+        own = getattr(client, "completion_tokens", 0) - spent
+        return {"calls": calls, "outcome": outcome, "tokens": own, "used": own + reused}
+
     kind = "think" if arm.get("think") else "plain"
-    spent = getattr(client, "completion_tokens", 0)
     raw, reasoning = await unchanged(kind)
     if arm["settings"] is None:
-        winner = check(build_candidate(raw, reasoning), tool_names=task_sets.TOOLS)
-        return {"id": task.id, "correct": score(task, winner), "calls": 1, "outcome": kind,
-                "given": given(winner)}
+        return check(build_candidate(raw, reasoning), tool_names=tools), cost(1, kind)
     cfg = merge_config(arm["settings"])
 
     async def sample(variant: int):
+        nonlocal reused
         if variant != 1 or store is None:
             return await client.complete(prompt, **variant_params(cfg, variant))
-        held = store.get("second", task.id)         # the second quick pass is shared too
+        held = store.get("second", key)             # the second quick pass is shared too
         if held is None:
             held = await client.complete(prompt, **variant_params(cfg, variant))
-            store.put("second", task.id, held[0], held[1], getattr(client, "last_tokens", 0))
+            store.put("second", key, held[0], held[1], getattr(client, "last_tokens", 0))
+        else:
+            reused += store.tokens.get(("second", key), 0)
         return held
 
     async def ask(text: str, variant: int):
@@ -172,14 +195,65 @@ async def episode(task: task_sets.Task, arm: dict[str, Any], client,
         return await client.complete(prompt + [{"role": "user", "content": note}],
                                      thinking=True, max_tokens=think_tokens)
 
-    ctx = StepContext(cfg=cfg, state=TurnState(), sample=sample, ask=ask, think=think,
-                      tool_names=task_sets.TOOLS)
-    decision = await resolve_step(raw, reasoning, 0, ctx)
-    return {"id": task.id, "correct": score(task, decision.winner),
-            "calls": 1 + decision.extra_calls, "outcome": decision.outcome,
-            "given": given(decision.winner),
-            # completion tokens of the calls this arm made itself (shared replies excluded)
-            "tokens": getattr(client, "completion_tokens", 0) - spent}
+    ctx = StepContext(cfg=cfg, state=state or TurnState(), sample=sample, ask=ask, think=think,
+                      tool_names=tools)
+    decision = await resolve_step(raw, reasoning, iteration, ctx)
+    return decision.winner, cost(1 + decision.extra_calls, decision.outcome)
+
+
+async def episode(task, arm: dict[str, Any], client,
+                  shared: Replies | None = None,
+                  think_tokens: int | None = None) -> dict[str, Any]:
+    """One task in one arm. ``shared`` holds reusable replies (see ``Replies``)."""
+    if task.kind == "multi":
+        return await multi_episode(task, arm, client, shared, think_tokens)
+    extra = reread.build(task.question, REREAD_ON) if arm["reread"] else None
+    winner, cost = await resolve(task_sets.messages(task, extra), task.id, arm, client, shared,
+                                 think_tokens, task_sets.TOOLS)
+    return {"id": task.id, "correct": score(task, winner), "given": given(winner), **cost}
+
+
+async def multi_episode(task: multistep.MultiTask, arm: dict[str, Any], client,
+                        shared: Replies | None = None,
+                        think_tokens: int | None = None) -> dict[str, Any]:
+    """A task of several dependent steps: the world runs each step the arm chooses.
+
+    The task passes when it ends with the right answer and the world is left as
+    the task requires. ``resolved`` counts how each step was decided.
+    """
+    world, history, state = task.world(), task_sets.messages(task), TurnState()
+    if arm["settings"] is not None:
+        arm = {**arm, "settings": {**arm["settings"], **MULTI_BUDGET}}
+    extra = reread.build(task.question, REREAD_ON) if arm["reread"] else None
+    total = {"calls": 0, "tokens": 0, "used": 0}
+    resolved: dict[str, int] = {}
+    final, steps = None, 0
+    while final is None and steps < task.max_steps:
+        prompt = history + ([{"role": "user", "content": extra}] if extra else [])
+        digest = hashlib.sha1(json.dumps(prompt).encode("utf-8")).hexdigest()[:16]
+        winner, cost = await resolve(prompt, f"{task.id}#{digest}", arm, client, shared,
+                                     think_tokens, task.tools, state, steps)
+        steps += 1
+        for name in total:
+            total[name] += cost[name]
+        resolved[cost["outcome"]] = resolved.get(cost["outcome"], 0) + 1
+        history.append({"role": "assistant", "content": winner.raw.strip() or "(empty reply)"})
+        if not winner.valid:
+            history.append({"role": "user", "content": multistep.BAD_STEP})
+        elif winner.kind == "final":
+            final = winner
+        else:
+            history.append({"role": "user",
+                            "content": world.run(winner.tool_name, winner.tool_args)})
+    failed = task.failures(world)
+    if final is None:
+        failed.insert(0, "no_answer")
+    elif not score(task, final):
+        failed.insert(0, "answer")
+    return {"id": task.id, "correct": not failed,
+            "outcome": "failed: " + ",".join(failed) if failed else "passed",
+            "given": given(final) if final is not None else "(no answer)",
+            "form": task.form, "steps": steps, "resolved": resolved, **total}
 
 
 class ServerDown(RuntimeError):
@@ -299,7 +373,7 @@ def parse(argv=None):
     mode.add_argument("--dry-run", action="store_true", help="simulated model; pipeline check only")
     mode.add_argument("--live", action="store_true", help="real model, behind the confirm gate")
     parser.add_argument("--suites", default="arith,tool",
-                        help="comma list of generated suites (arith, tool, arith_hard, tool_hard, arith_chain) "
+                        help="comma list of generated suites (arith, tool, arith_hard, tool_hard, arith_chain, multi) "
                              "or .jsonl paths")
     parser.add_argument("--arms", default="plain,reread,agree,deepen,stack")
     parser.add_argument("--tasks", type=int, default=100)
@@ -355,7 +429,8 @@ def main(argv=None) -> int:
         key = os.environ.get(args.api_key_env, "") if args.api_key_env else ""
         per_task = {"plain": 1, "think": 1, "reread": 1, "agree": 2.3, "deepen": 2, "stack": 2.3,
                     "escalate": 2.4, "carry": 2.5}
-        estimate = int(sum(per_task[name] for name in args.arms) * args.tasks * len(args.suites))
+        steps = sum(STEPS_PER_MULTI_TASK if suite in multistep.SUITES else 1 for suite in args.suites)
+        estimate = int(sum(per_task[name] for name in args.arms) * args.tasks * steps)
         if not gate.confirm_live(args.endpoint, args.model, estimate, args.concurrency,
                                  api_key=key, allow_model_swap=args.allow_model_swap,
                                  allow_unknown_state=args.allow_unknown_state,

@@ -75,6 +75,9 @@ class SimulatedModel:
     mistakes, so real gains will be smaller. A call with ``thinking`` on adds
     ``think_gain`` and a longer reply, to exercise the reasoning arms, and with
     probability ``runaway`` it reasons up to the token limit without answering.
+    On a multi-step task it plays the task's own solution one step per call,
+    with the per-step skill set so that a whole task succeeds about ``skill`` of
+    the time.
     """
 
     def __init__(self, gold: dict[str, Any], skill: float = 0.7, malformed: float = 0.05,
@@ -109,9 +112,14 @@ class SimulatedModel:
             skill += self.reread_gain
         if thinking:
             skill += self.think_gain
+        step = None
+        if task.kind == "multi":                    # the next step of the task's own solution
+            taken = sum(1 for m in messages if m["role"] == "assistant")
+            step = task.script[min(taken, len(task.script) - 1)]
+            skill = min(1.0, skill) ** (1 / len(task.script))
         correct = self.rng.random() < skill
-        if task.kind == "tool":
-            name, args = task.tool_name, dict(task.tool_args)
+        if task.kind == "tool" or (step is not None and step[0] != "response"):
+            name, args = (task.tool_name, dict(task.tool_args)) if step is None else (step[0], dict(step[1]))
             if not correct:
                 if self.rng.random() < 0.5:
                     name = self.rng.choice(["read_file", "write_file", "run_shell", "search_web"])
